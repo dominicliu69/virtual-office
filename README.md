@@ -68,9 +68,10 @@ Grok 入場後，同一個邀請視窗會帶你逐步完成最後連接；一次
 | --- | --- | --- |
 | Codex App（macOS） | 邀請時辨認目前 session；檢查本機原生 queue 能力 | 同一聊天背景排隊；未載入的聊天仍需平台載入 |
 | Hermes | `office.py connect-hermes` 建立固定 ACP session | 背景執行、公開回覆及上下文續接 |
-| Cursor Desktop 的 Cloud Agent | 首次填自己的 API key，再選 Agent 連結 | 沿用同一 Agent，背景執行、公開串流回覆、原生 run 狀態及歷史 |
+| Cursor Desktop 的 Cloud Agent | 邀請視窗已不再提供；程式仍保留舊路由 | 沿用同一 Agent，背景執行、公開串流回覆、原生 run 狀態及歷史 |
 | Grok Bot | 邀請 Prompt、自己的 Webhook routine、首次本機回報 | 背景喚醒指定 Bot，公開進度與交付由 Bot 回傳 |
-| Cursor Desktop 的本機聊天 | 既有 Hooks／主動上報 | 只同步；尚未有已驗證的原聊天背景指令入口 |
+| Cursor 本機 Agent（SDK） | 先 `pip install cursor-sdk`，再在「＋ 新對話」填一次 API key 並建立 `agent-…` session | 辦公室打字會 `resume` 再送去同一條本機 session，公開回覆串流返嚟。未封存的 Cloud Agent 會在新對話、封存或重開後對一次名單，不會定時查。唔係而家開住嘅 IDE 側欄聊天 |
+| Cursor Desktop 的本機聊天 | 邀請視窗已不再提供；Hook 程式仍留在檔案裡 | 只同步；尚未有已驗證的原聊天背景指令入口 |
 
 設定保存在每個使用者自己的 `.office/`，不用改 Python 或找開發者接駁；這兩條新流程也不用重啟 OFFICE。Grok Bot 需要能使用 OFFICE 所在電腦的本機執行工具，只有雲端 terminal 的 Bot 暫不能回傳。詳見 [Grok Bot](docs/GROK-BOT.md) 及 [Cursor](docs/CURSOR.md)。
 

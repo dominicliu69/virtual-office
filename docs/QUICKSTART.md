@@ -4,7 +4,7 @@
 
 ## 簡易模式
 
-按右下角「簡易模式」，畫面會集中顯示 G/F 全部已入場的 Agent 及頭頂對話，收起統計、樓層、成員名單、活動及其他工具。3D 辦公室效果保留；點角色頭頂名稱可讀取紀錄、輸入指示。
+按右下角「簡易模式」，畫面會集中顯示 G/F 全部已入場的 Agent 及頭頂對話，收起統計、樓層、成員名單、活動及其他工具。3D 辦公室效果保留；點選 Agent 後在畫面下方輸入；頭頂名稱仍可讀取紀錄。
 
 右上角「完整模式」可恢復全部功能，再按「＋ 邀請 Agent」邀請新成員。完整模式每次開啟及從簡易模式切回時預設停在 G/F；辦公室未有 Agent 時亦顯示 G/F 大堂。瀏覽器會記住模式，下次開啟亦保留；切換模式不會改變 Agent 身份、權限或歷史。
 
@@ -37,7 +37,7 @@ python3 office.py url
 
 ## 入場後持續收訊
 
-入場及首次回報後，程式自動檢查原生指令入口：沿用已保存的路由，或嘗試平台支援的原 session 自動辨認。這不表示每個平台都已有背景入口；Grok Webhook、Hermes ACP 及 Cursor Cloud 仍須完成各自的一次性接駁。完成後，Agent 可以正常結束回合；下次直接在頭頂對話輸入指示，不用再叫它待命，也沒有一小時到期。現有 Agent 按「啟用持續收訊」可升級，保留身份、歷史及尚未收取的留言。
+入場及首次回報後，程式自動檢查原生指令入口：沿用已保存的路由，或嘗試平台支援的原 session 自動辨認。這不表示每個平台都已有背景入口；Grok Webhook、Hermes ACP 及 Cursor Cloud 仍須完成各自的一次性接駁。完成後，Agent 可以正常結束回合；下次選中後在畫面下方輸入指示，不用再叫它待命，也沒有一小時到期。現有 Agent 按「啟用持續收訊」可升級，保留身份、歷史及尚未收取的留言。
 
 `join.py` 的 `joined=true` 與兩個 `accepted=true` 證明入場及首次回報。另看 `receiver_status`：`ready` 表示入口已設定且目前可用；`configured_unavailable` 表示路由仍保存、等待平台恢復；`setup_required` 表示尚欠原生接駁；`unsupported` 表示目前平台沒有可用的背景入口；`disabled` 表示擁有人停用派工；`rejoin_required` 表示身份已失效，需要由擁有人產生新邀請。`persistent=true` 只表示持久路由已設定，不能單憑它判斷平台目前可用。任何入場結果都不代替實際指令的接收、執行及交付驗證。
 
@@ -59,9 +59,10 @@ Grok 入場後，同一個邀請視窗會帶你逐步完成最後連接；一次
 | --- | --- | --- |
 | Codex App（macOS） | 邀請時辨認目前 session；檢查本機原生 queue 能力 | 同一聊天背景排隊；未載入的聊天仍需平台載入 |
 | Hermes | `office.py connect-hermes` 建立固定 ACP session | 背景執行、公開回覆及上下文續接 |
-| Cursor Desktop 的 Cloud Agent | 首次填自己的 API key，再選 Agent 連結 | 沿用同一 Agent，背景執行、公開串流回覆、原生 run 狀態及歷史 |
+| Cursor Desktop 的 Cloud Agent | 邀請視窗已不再提供；程式仍保留舊路由 | 沿用同一 Agent，背景執行、公開串流回覆、原生 run 狀態及歷史 |
 | Grok Bot | 邀請 Prompt、自己的 Webhook routine、首次本機回報 | 背景喚醒指定 Bot，公開進度與交付由 Bot 回傳 |
-| Cursor Desktop 的本機聊天 | 既有 Hooks／主動上報 | 只同步；尚未有已驗證的原聊天背景指令入口 |
+| Cursor 本機 Agent（SDK） | 先 `pip install cursor-sdk`，再在「＋ 新對話」填一次 API key 並建立 `agent-…` session | 辦公室打字會 `resume` 再送去同一條本機 session，公開回覆串流返嚟。未封存的 Cloud Agent 會在新對話、封存或重開後對一次名單，不會定時查。唔係而家開住嘅 IDE 側欄聊天 |
+| Cursor Desktop 的本機聊天 | 邀請視窗已不再提供；Hook 程式仍留在檔案裡 | 只同步；尚未有已驗證的原聊天背景指令入口 |
 
 設定保存在每個使用者自己的 `.office/`，不用改 Python 或找開發者接駁；這兩條新流程也不用重啟 OFFICE。Grok Bot 需要能使用 OFFICE 所在電腦的本機執行工具，只有雲端 terminal 的 Bot 暫不能回傳。詳見 [Grok Bot](GROK-BOT.md) 及 [Cursor](CURSOR.md)。
 
@@ -82,7 +83,7 @@ Grok 入場後，同一個邀請視窗會帶你逐步完成最後連接；一次
 
 合作回報只保存公開任務、進度及交付；不讀取內部推理或工具原文。沒有來源事件時不猜測狀態。Grok 的新邀請會在同一份指引加入目前 Bot 的長期公開回報規則，仍不把記憶保存當作自動同步證據。
 
-Cursor 本機聊天同一份入場 Prompt 亦必須接續完成原生 Hook 安裝及原聊天綁定，不能因 `receiver_status=unsupported` 就提早結束。`observation_status=setup_required` 或 `binding_required` 表示尚未完成；只有伺服器核對目前身份、世代及原生回覆標記後，才回傳 `configured`。這個公開同步結果與背景派訊息能力分開；`public_sync_onboarding_complete=true` 不代表原聊天可被 OFFICE 喚醒。一次綁定後，後續工作沿用共用 Python Hook，毋須每次提醒 Agent 上報。Python 同時補讀該原聊天已驗證回合的公開文字，主聊天與子 Agent 均按自己的原生回合隔離，不讀取思考、工具原文或未選聊天。
+新的 Cursor 入場不再要求安裝原生 Hook。Hook 程式仍在檔案裡，但邀請 Prompt 同收件箱不會再帶用戶去安裝。
 
 ## 邀請 Agent（一般使用方式）
 
@@ -108,7 +109,7 @@ Python 會自動建立專用回報及收訊資料、填好目前安裝位置，�
 python3 office.py connect-hermes --name "My Hermes" --workspace /absolute/path/to/project
 ```
 
-重新啟動 OFFICE 後，點角色頭頂對話即可傳送指示。Hermes 在背景執行、同步公開回覆並保留上下文；OFFICE 不會開啟 App 或終端視窗。所用模型與供應商沿用你的 Hermes 設定，通用套件沒有指定模型路由。支援原生批准要求的「允許今次／拒絕」。詳見 [Hermes 指引](HERMES.md)。
+重新啟動 OFFICE 後，選中角色後在畫面下方傳送指示。Hermes 在背景執行、同步公開回覆並保留上下文；OFFICE 不會開啟 App 或終端視窗。所用模型與供應商沿用你的 Hermes 設定，通用套件沒有指定模型路由。支援原生批准要求的「允許今次／拒絕」。詳見 [Hermes 指引](HERMES.md)。
 
 這項接駁使用 Hermes ACP session，與上面的通用上報邀請分開。已在 macOS 的一個真實 Hermes session 驗證兩輪工具執行，以及重啟後續接；其他平台及模型組合仍需各自驗證。
 
@@ -195,4 +196,4 @@ Node 只用於開發測試，啟動 OFFICE 不需要。
 
 ## OFFICE 指令輸入
 
-已接通 macOS Codex App 原聊天：點 Agent 頭頂對話即可傳送文字，由 Python 排隊、去重並配對實際回覆。新邀請會在指定的原聊天完成綁定；不會自動選入其他聊天。詳見 [指令接駁及 Hermes／OpenCode 擴充方式](COMMANDS.md)。Hermes ACP 已實作；OpenCode 原生背景 adapter 尚未實作。
+已接通 macOS Codex App 原聊天：選中 Agent 後在畫面下方傳送文字，由 Python 排隊、去重並配對實際回覆。新邀請會在指定的原聊天完成綁定；不會自動選入其他聊天。詳見 [指令接駁及 Hermes／OpenCode 擴充方式](COMMANDS.md)。Hermes ACP 已實作；OpenCode 原生背景 adapter 尚未實作。

@@ -46,28 +46,36 @@ class CursorOnboardingTests(unittest.TestCase):
     def join_cli(self, invitation):
         process=subprocess.run([sys.executable,str(Path(__file__).parent/'adapters/join.py'),'--invite',
             str(self.bridge.invitations.paths(invitation['id'])[0])],cwd=self.root,
-            stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=10)
+            stdin=subprocess.DEVNULL,capture_output=True,encoding='utf-8',errors='replace',timeout=10)
         self.assertEqual(process.returncode,0,process.stderr)
         return json.loads(process.stdout)
 
-    def test_one_prompt_requires_public_sync_despite_unsupported_receiving(self):
+    def observed(self, joined):
+        import hashlib
+        agent=self.bridge.definitions[joined['agent_id']]
+        folder=self.bridge.inbox.root/hashlib.sha256(joined['agent_id'].encode()).hexdigest()
+        return self.bridge.inbox.cursor_observation(agent, folder)
+
+    def test_invite_does_not_install_hooks_when_receiving_is_unsupported(self):
         invitation,joined=self.admission()
-        self.assertIn('3c.',invitation['prompt'])
-        self.assertIn('即使 receiver_status=unsupported',invitation['prompt'])
+        guide=self.bridge.invitations.paths(invitation['id'])[1].read_text()
+        self.assertNotIn('cursor-children',guide)
+        self.assertNotIn('cursor-children',invitation['prompt'])
+        self.assertNotIn('共用 Hook',invitation['prompt'])
+        self.assertNotIn('observation',joined['conversation'])
         result=self.join_cli(invitation)
         self.assertTrue(result['joined'])
         self.assertEqual(result['receiver_status'],'unsupported')
-        self.assertEqual(result['observation_status'],'setup_required')
-        self.assertTrue(result['observation_setup_required'])
-        self.assertFalse(result['public_sync_onboarding_complete'])
-        self.assertFalse(result['full_onboarding_complete'])
-        self.assertIn('不能因 receiver_status=unsupported 就此結束',result['next_step'])
-        self.assertIn('本次原聊天公開最終回覆',result['next_step'])
+        self.assertEqual(result['observation_status'],'not_required')
+        self.assertFalse(result['observation_setup_required'])
+        self.assertNotIn('cursor-children',result['next_step'])
+        self.assertNotIn('activation_marker',result['next_step'])
         self.assertEqual(len(self.bridge.definitions),1)
 
     def test_descriptor_uses_only_original_event_credential_and_install_relative_program(self):
         invitation,joined=self.admission()
-        observation=joined['conversation']['observation']
+        self.assertNotIn('observation',joined['conversation'])
+        observation=self.observed(joined)
         original,credential=self.original(invitation)
         inbox=Path(joined['conversation']['credential_path'])
         argv=observation['setup_command']
@@ -94,10 +102,9 @@ class CursorOnboardingTests(unittest.TestCase):
         self.assertTrue(pending['pending'])
         self.assertTrue(pending['activation_marker'].startswith('OFFICE_CURSOR_BIND_'))
         result=self.join_cli(invitation)
-        self.assertEqual(result['observation_status'],'binding_required')
-        self.assertFalse(result['conversation']['observation']['configured'])
-        self.assertFalse(result['public_sync_onboarding_complete'])
-        self.assertIn('activation_marker',result['next_step'])
+        self.assertEqual(result['observation_status'],'not_required')
+        self.assertNotIn('observation',result['conversation'])
+        self.assertEqual(self.observed(joined)['state'],'binding_required')
         self.assertFalse(result['native_connection']['connected'])
 
     def test_cold_join_immediately_authorizes_scoped_observer_without_background_poll(self):
@@ -108,7 +115,8 @@ class CursorOnboardingTests(unittest.TestCase):
         self.assertEqual(status,200,pending)
         self.assertTrue(pending['pending'])
         self.assertEqual(pending['agent_id'],joined['agent_id'])
-        self.assertEqual(self.conversation(joined['agent_id'])['observation']['state'],'binding_required')
+        self.assertNotIn('observation',self.conversation(joined['agent_id']))
+        self.assertEqual(self.observed(joined)['state'],'binding_required')
 
     def test_server_verified_binding_completes_sync_only_and_is_reused(self):
         invitation,joined=self.admission()
@@ -119,13 +127,11 @@ class CursorOnboardingTests(unittest.TestCase):
             {'native_session_id':'cursor-fixture-original-session','activation_marker':pending['activation_marker']})
         before=Path(bound['credential_path']).read_bytes()
         result=self.join_cli(invitation)
-        self.assertEqual(result['observation_status'],'configured')
-        self.assertTrue(result['public_sync_onboarding_complete'])
-        self.assertFalse(result['observation_setup_required'])
-        self.assertFalse(result['observation_execution_verified'])
-        self.assertFalse(result['full_onboarding_complete'])
-        self.assertIn('公開同步綁定已由伺服器確認',result['next_step'])
-        self.assertIn('OFFICE 只能保存留言',result['next_step'])
+        self.assertEqual(result['observation_status'],'not_required')
+        self.assertNotIn('observation',result['conversation'])
+        direct=self.observed(joined)
+        self.assertEqual(direct['state'],'configured')
+        self.assertFalse(direct['execution_verified'])
         self.assertEqual(Path(bound['credential_path']).read_bytes(),before)
 
     def test_missing_current_observer_file_does_not_report_configured(self):
@@ -133,7 +139,8 @@ class CursorOnboardingTests(unittest.TestCase):
         binding=self.bridge.child_events.create_observer({'agent_id':joined['agent_id'],
             'provider':'cursor','native_session_id':'cursor-fixture-original-session'})
         Path(binding['credential_path']).unlink()
-        observation=self.conversation(joined['agent_id'])['observation']
+        self.assertNotIn('observation',self.conversation(joined['agent_id']))
+        observation=self.observed(joined)
         self.assertEqual(observation['state'],'stale')
         self.assertFalse(observation['configured'])
         self.assertEqual(observation['reason'],'native_observer_credential_unavailable')
@@ -142,7 +149,8 @@ class CursorOnboardingTests(unittest.TestCase):
         invitation,joined=self.admission()
         original,_=self.original(invitation)
         original.write_bytes(Path(joined['conversation']['credential_path']).read_bytes())
-        observation=self.conversation(joined['agent_id'])['observation']
+        self.assertNotIn('observation',self.conversation(joined['agent_id']))
+        observation=self.observed(joined)
         self.assertEqual(observation['state'],'stale')
         self.assertIsNone(observation['setup_command'])
         self.assertIsNone(observation['guide_path'])
@@ -154,7 +162,8 @@ class CursorOnboardingTests(unittest.TestCase):
         retired=original.with_name('credential.logged-out-'+uuid.uuid4().hex+'.json')
         retired.write_text('RETIRED_PRIVATE_NON_JSON_DO_NOT_READ')
         original.unlink()
-        observation=self.conversation(joined['agent_id'])['observation']
+        self.assertNotIn('observation',self.conversation(joined['agent_id']))
+        observation=self.observed(joined)
         self.assertEqual(observation['state'],'stale')
         self.assertIsNone(observation['setup_command'])
         self.assertEqual(retired.read_text(),'RETIRED_PRIVATE_NON_JSON_DO_NOT_READ')
@@ -166,7 +175,8 @@ class CursorOnboardingTests(unittest.TestCase):
         for value in ([],None,'not-a-credential',42):
             with self.subTest(value=value):
                 original.write_text(json.dumps(value))
-                observation=self.conversation(joined['agent_id'])['observation']
+                self.assertNotIn('observation',self.conversation(joined['agent_id']))
+                observation=self.observed(joined)
                 self.assertEqual(observation['state'],'stale')
                 self.assertIsNone(observation['setup_command'])
                 self.assertIsNone(observation['guide_path'])

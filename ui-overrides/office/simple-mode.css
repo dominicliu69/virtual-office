@@ -44,6 +44,7 @@
 .office-simple-mode .office-speech:not(.expanded) .speech-name { flex: 1; }
 .office-simple-mode .office-speech:not(.expanded) .speech-meta,
 .office-simple-mode .office-speech:not(.expanded) .speech-preview { display: none; }
+.office-simple-mode .office-speech.is-working:not(.expanded) .speech-preview { display: -webkit-box; }
 .office-simple-mode .office-speech:not(.expanded) .speech-peek::after { content: none; }
 .office-simple-mode .office-speech.has-family .speech-peek { padding-right: 91px; }
 .office-simple-mode .speech-peek:focus-visible { outline: 3px solid #49835e; outline-offset: 3px; }

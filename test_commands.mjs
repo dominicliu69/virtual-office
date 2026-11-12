@@ -81,7 +81,8 @@ test('new invitations require a supported explicit platform and never infer Grok
   try{
     const {invitationPlatform}=await import('./public/office/invite.js');
     for(const value of ['',undefined,null,'auto','Grok Bot','CODEX','hermes-unconfigured',{}])assert.equal(invitationPlatform(value),null);
-    for(const value of ['codex','cursor','cursor_cloud','grok_bot','crouton','generic'])assert.equal(invitationPlatform(value),value);
+    for(const value of ['codex','cursor_local','grok_bot','crouton','generic'])assert.equal(invitationPlatform(value),value);
+    for(const value of ['cursor','cursor_cloud'])assert.equal(invitationPlatform(value),null);
   }finally{if(prior===undefined)delete globalThis.location;else globalThis.location=prior;}
 });
 
@@ -148,6 +149,7 @@ test('unavailable Cursor local receiving explains mailbox storage without repeat
   assert.equal(receivingHint(grok),'持續接駁待完成 · 可先留言');
   assert.equal(receivingHint({...grok,receiver_online:true}),'臨時收訊中 · 持續接駁待完成');
   assert.equal(receivingHint({mode:'cursor_cloud',persistent:true,native_ready:true}),'持續收訊已接通 · 無需待命');
+  assert.equal(receivingHint({mode:'cursor_local',persistent:true,native_ready:true}),'本機 Cursor 已接通 · 直接傳送');
 });
 
 test('lost response and reloaded composer retain retry identity without storing prompt',async()=>{

@@ -43,12 +43,6 @@ ONBOARDING_FLOW=(
     '即使 receiver_status=ready，亦不能略過這一步或等待人類再貼另一份 Prompt。'
     'reporting_status=setup_required 或 stale 時完成設定；agent_confirmed 只代表合作設定已確認，'
     '不能代替之後在原 App 直接工作的實際同步證據；revoked 時停止並要求新邀請。\n'
-    '3c. 如 conversation.observation.method=native_hook，必須在同一份入場流程完成所選 Cursor 原聊天的公開同步：'
-    '讀取 observation.guide_path，依其 setup_command 安裝本 OFFICE 共用 Hook，再按回傳結果處理。'
-    'setup_required／stale 時不能略過；binding_required 時在本次原聊天公開最終回覆原樣包含 activation_marker 一次，'
-    '由原生 Hook 核對並綁定身份，不要求人類再貼第二段 Prompt。configured 才表示伺服器已確認目前綁定，'
-    '安裝成功、activation_marker 或入場成功本身都不等於已同步新工作。'
-    '即使 receiver_status=unsupported，仍須完成這項公開同步；兩項能力分開回報，不改接 Cloud、CLI 或其他聊天。\n'
     '4. 最後一次回覆 run_id、首次回報結果、公開同步結果及持續收訊結果。'
     '分開說明 OFFICE 指示收發與原 App 直接工作的同步範圍；收發成功不能代替 App 對話同步證據。'
     '說明入口是否保留同一 session；若只綁定同一 Bot，清楚說明未保證原聊天。'
@@ -260,22 +254,6 @@ class Invitations:
                     '即使已保存入口，仍只表示設定完成；由擁有人在 OFFICE 助手按「測試連接」，'
                     '服務核對同一 Bot 的測試開始、相配回覆及正常完成後，才顯示「已連接」。\n')
                 guide_text+=grok_connection_handoff(name,provider+':'+source)
-            if provider=='cursor':
-                child_setup=shlex.join([sys.executable,str(ROOT/'adapters/connect.py'),'--credential',str(credential),
-                    'cursor-children','--hooks-file',str(Path.home()/'.cursor/hooks.json')])
-                guide_text+=('\nCursor 本機父子 Agent 原生 Hooks：\n'
-                    '完成上面首次接入後，必須於同一份入場流程完成公開同步。優先讀取 conversation.observation.guide_path；'
-                    '原聊天背景喚醒未支援，不得因此略過這項設定。於 OFFICE 所在電腦執行這個一次性設定命令：\n\n'+child_setup+'\n\n'
-                    '它只追加本 OFFICE 的觀察 Hook，保留原有 Hook／批准規則，並以專用觀察憑證限定你自己的原生聊天。'
-                    '不要修改原本安全 Hook、不要切換模型、不要另開 CLI Agent。\n'
-                    '若回傳 activation_marker，在目前這個原聊天的公開最終回覆原樣包含該行一次。'
-                    '原生 afterAgentResponse Hook 會用這個一次性標記驗證目前 conversation 身份；未綁定前不宣稱子 Agent 已同步。'
-                    '後續由 Python Hook 同步原生父子身份及狀態，共用 Python 讀取器同步該子回合自己的公開文字及交付；不需要每次叫 Agent 待命或手動上報。'
-                    'Hook 只觀察入選聊天，未選聊天、thinking、工具參數及工具原文不保存。\n'
-                    '子 Agent 觀察與背景收訊是兩項能力；這個 Hook 不會把本機聊天變成 Cloud Agent，亦不會自動取得背景派工入口。'
-                    '本機一般聊天的 capability.persistent=false 並不妨礙入場及公開同步；不要為此嘗試 Codex、Hermes、Grok 或 Cloud 入口。'
-                    '如已登出或邀請被撤銷，先停止接駁，請擁有人產生新邀請；不可改名或重用 credential.logged-out 檔案。'
-                    '若本機 Cursor 不提供這些 Hook 或無法執行，回報實際限制，不使用模擬子 Agent 代替。\n')
             private_file(guide,guide_text)
             now=time.time()
             self.history.db.execute('''INSERT INTO invitations

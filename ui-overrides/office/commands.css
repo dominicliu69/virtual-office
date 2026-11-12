@@ -18,3 +18,44 @@
 .command-pending p {display:flex; align-items:center; gap:8px; margin:8px 0;}
 .command-pending span {flex:1; min-width:0; overflow-wrap:anywhere;}
 .command-pending button {flex:none; padding:4px 8px; border:1px solid #c6cfc8; border-radius:6px; background:transparent; color:inherit; cursor:pointer;}
+
+/* Selected-agent composer. Same graphite card as the member list, sitting under the floor. */
+.office-composer-dock{
+  position:fixed;z-index:25;left:max(16px,calc(50vw - 240px));right:auto;width:min(480px,calc(100vw - 32px));bottom:16px;box-sizing:border-box;
+  display:grid;gap:2px;padding:12px 14px 10px;border-radius:22px;pointer-events:auto;
+  color:#F2F2F7;
+  background:linear-gradient(180deg,rgba(255,255,255,.07),transparent 45%,rgba(0,0,0,.14)),#232327;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 0 1px rgba(255,255,255,.05),0 8px 24px rgba(18,22,34,.22);
+  font-family:ui-rounded,"SF Pro Rounded","Nunito",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.office-composer-dock[hidden]{display:none!important}
+.office-composer-head{display:flex;align-items:center;gap:8px;min-width:0}
+.office-composer-name{flex:1;min-width:0;margin:0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:900 14px/1.2 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif;color:#F2F2F7}
+.office-composer-name[hidden],.office-composer-editor[hidden]{display:none!important}
+.office-composer-editor{flex:1;min-width:0;border:0;border-radius:10px;background:#F4F4F6;color:#1D1D1F;padding:6px 8px;font:600 14px/1.2 Inter,system-ui,sans-serif}
+.office-composer-rename{flex:none;border:0;border-radius:999px;background:#34343a;color:#F2F2F7;padding:5px 10px;font:800 11px/1 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif;cursor:pointer}
+.office-composer-log{height:168px;overflow:auto;overscroll-behavior:contain;margin:6px 0;padding-right:2px}
+.office-composer-resize{position:absolute;z-index:2;touch-action:none}
+.office-composer-resize.is-top{left:18px;right:18px;top:-5px;height:10px;cursor:ns-resize}
+.office-composer-resize.is-left{left:-5px;top:22px;bottom:14px;width:10px;cursor:ew-resize}
+.office-composer-resize.is-right{right:-5px;top:22px;bottom:14px;width:10px;cursor:ew-resize}
+.office-composer-resize:hover{background:rgba(255,255,255,.16)}
+.office-composer-resize.is-top:hover{border-radius:8px}
+.office-composer-empty{margin:4px;color:#B4B4BA;font:600 12px/1.4 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif}
+.office-composer-message{margin:6px 0;padding:8px 10px;border-radius:12px;background:#2d2d33}
+.office-composer-message[data-role=user]{background:#1d3a30}
+.office-composer-message small{color:#B4B4BA;font:700 10px/1 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif}
+.office-composer-message p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:500 13px/1.45 Inter,system-ui,sans-serif}
+.bhq-member.is-unread .bhq-mname::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:#7DB7FF;box-shadow:0 0 6px #7DB7FF;vertical-align:1px}
+.office-composer-dock .office-command{border-top:0;margin:0;padding:0;color:#F2F2F7;background:transparent}
+.office-composer-dock .office-command label{color:#C8C8CE;font:800 11px/1.3 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif}
+.office-composer-dock .office-command textarea{
+  min-height:44px;max-height:120px;margin:6px 0;border:0;border-radius:14px;
+  background:#F4F4F6;color:#1D1D1F;padding:10px 12px;font:500 14px/1.45 Inter,system-ui,sans-serif;
+}
+.office-composer-dock .office-command textarea:focus{outline:2px solid #7DB7FF;outline-offset:1px}
+.office-composer-dock .office-command form button{flex:none;border-radius:14px;background:#22684e;padding:8px 16px;font:800 13px/1 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif}
+.office-composer-dock .command-actions{min-width:0}
+.office-composer-dock .command-actions span,.office-composer-dock .command-status{min-width:0;color:#B4B4BA}
+.office-composer-dock .command-actions span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html.office-simple-mode .office-composer-dock{left:max(16px,calc(50vw - 240px));right:auto;width:min(480px,calc(100vw - 32px))}

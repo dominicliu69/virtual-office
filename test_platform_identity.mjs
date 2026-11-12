@@ -18,7 +18,7 @@ test('all four registered platforms keep identity across names, states and confl
   assert.equal(visualPlatform({provider:'codex',command_capability:{mode:'hermes_acp'}}),'codex');
 });
 test('explicit native modes can identify a generic runtime; names and unknown values never invent a platform',()=>{
-  for(const [mode,platform] of Object.entries({background_queue:'codex',hermes_acp:'hermes',cursor_cloud:'cursor',grok_webhook:'grok_bot'}))assert.equal(visualPlatform({provider:'generic',command_capability:{mode}}),platform);
+  for(const [mode,platform] of Object.entries({background_queue:'codex',hermes_acp:'hermes',cursor_cloud:'cursor',cursor_local:'cursor',grok_webhook:'grok_bot'}))assert.equal(visualPlatform({provider:'generic',command_capability:{mode}}),platform);
   for(const bot of [{name:'Codex'},{provider:'generic',command_capability:{mode:'agent_inbox'}},{provider:'crouton',command_capability:{mode:'hermes_acp'}},{provider:'unknown'},{provider:'__proto__'},{command_capability:{mode:'__proto__'}},{command_capability:{mode:{}}}])assert.equal(visualPlatform(bot),null);
 });
 test('provider changes replace the model while status, names and legacy colors do not rebuild platform models',()=>{

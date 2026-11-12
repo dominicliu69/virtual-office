@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { smoothstep, lerp, clamp } from './spring.js';
 import { createSunPatch } from './sunpatch.js';
-import {shadowVolume,shadowMapSize,resizeShadowMap,NATIVE_LAMP} from './lighting-layout.js';
+import { renderSettings } from './render-settings.js';
 
 const rgb = (hex) => { const c = new THREE.Color(hex); c.convertLinearToSRGB(); return [c.r, c.g, c.b]; };
 
@@ -148,25 +148,27 @@ function parseClock(s) {
 const PLAN_MS = 20000;                                    // the target follows the clock every 20 s
 const SCAN_MS = 2000;                                     // materials and shadow flags are refreshed every 2 s
 const LAMP_COUNT = 6;
-const LAMP_COLOR = NATIVE_LAMP.color;
-const LAMP_INTENSITY = NATIVE_LAMP.intensity;              // the spot lights on the lit furniture (cd)
+const LAMP_COLOR = 0xffbb74;
+const LAMP_INTENSITY = 22;                                // the spot lights on the lit furniture (cd)
 const LAMP_POOL = 4.0;                                    // the same lamps on the baked floor (sunpatch.js)
-const LAMP_ANGLE = NATIVE_LAMP.angle;                      // rad, half the cone of a pendant's shade
-const LAMP_PENUMBRA = NATIVE_LAMP.penumbra;
+const LAMP_ANGLE = 0.78;                                  // rad, half the cone of a pendant's shade
+const LAMP_PENUMBRA = 0.75;
 const ROOM = { x: 8.3, z: 6.3, y0: -0.05, y1: 3.0 };      // what the sun's shadow camera must cover, around the floor
 const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 const isLit = (m) => m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial || m.isMeshToonMaterial;
 const NO_SHADOW = /^(slab|glass)/;                        // the floor slab sits under the floor; glass lets the sun through
-const TABLE = /^table_\d+$/;                              // original baked workspace table pools
+const TABLE = /^table_\d+$/;                              // the desks under the pendants
 
 export function createDaylight({ scene, renderer }) {
   const params = new URLSearchParams(location.search);
   // the shadow map is on from the start, so no lit material ever compiles twice
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  const picture = renderSettings();
   const sun = new THREE.DirectionalLight(0xffffff, 1);
-  sun.castShadow = true;
-  sun.shadow.mapSize.setScalar(COARSE ? 1024 : 2048);
+  sun.castShadow = picture.shadow !== 0;
+  sun.shadow.mapSize.setScalar(picture.shadow || (COARSE ? 1024 : 2048));
+  let lampsEnabled = picture.lamps;
   sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = 0.02;
   sun.shadow.radius = 2;
@@ -202,6 +204,14 @@ export function createDaylight({ scene, renderer }) {
   let lastHtml = -1e9;
   let lastPlan = -1e9;
   let lastScan = -1e9;
+
+  // Three builds the shadow map at the start of the colour render. Rebind it before the floor shader,
+  // so the frame that creates, resizes or drops the map is the frame the picture uses.
+  const previousBefore = scene.onBeforeRender;
+  scene.onBeforeRender = function (...args) {
+    previousBefore.call(this, ...args);
+    if (cur) patch.update(dir, cur.floorSunC, cur.floorSun, 1 - cur.bake);
+  };
 
   const dir = new THREE.Vector3();
   const centre = new THREE.Vector3();
@@ -245,11 +255,8 @@ export function createDaylight({ scene, renderer }) {
     inst?.root.traverse((o) => {
       if (!o.isMesh) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
-      const opaque=mats.every((m) => isLit(m) && !m.transparent);
-      const on = opaque && !NO_SHADOW.test(o.name) && !NO_SHADOW.test(o.parent?.name || '');
-      const receiver=opaque&&o.userData.shadowReceiver===true;
-      o.castShadow = on&&!receiver;
-      o.receiveShadow = on||receiver;
+      const on = mats.every((m) => isLit(m) && !m.transparent) && !NO_SHADOW.test(o.name) && !NO_SHADOW.test(o.parent?.name || '');
+      o.castShadow = o.receiveShadow = on;
     });
     tables = [];
     if (inst) {
@@ -265,22 +272,18 @@ export function createDaylight({ scene, renderer }) {
   // The sun's shadow camera: looking down the sun's direction at the active floor, fitted tightly around the room.
   function fitShadow() {
     const root = building?.activeOpen()?.root;
-    const layout=building?.activeSlot?.kind==='overview'?building.overview.layout:null;
-    const room=shadowVolume(layout);
-    resizeShadowMap(sun.shadow,shadowMapSize(!!layout,COARSE,renderer.capabilities?.maxTextureSize));
     if (root) root.getWorldPosition(centre); else centre.set(0, 0, 0);
     const y = centre.y;
-    centre.x+=room.cx;centre.z+=room.cz;
-    centre.y += (room.y0 + room.y1) / 2;
+    centre.y += (ROOM.y0 + ROOM.y1) / 2;
     sun.target.position.copy(centre);
-    sun.position.copy(centre).addScaledVector(dir, room.distance);
+    sun.position.copy(centre).addScaledVector(dir, 30);
     const cam = sun.shadow.camera;
     cam.position.copy(sun.position);
     cam.lookAt(centre);
     cam.updateMatrixWorld();
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (let i = 0; i < 8; i++) {
-      corner.set(centre.x + (i & 1 ? room.x : -room.x), y + (i & 2 ? room.y1 : room.y0), centre.z + (i & 4 ? room.z : -room.z));
+      corner.set(centre.x + (i & 1 ? ROOM.x : -ROOM.x), y + (i & 2 ? ROOM.y1 : ROOM.y0), centre.z + (i & 4 ? ROOM.z : -ROOM.z));
       corner.applyMatrix4(cam.matrixWorldInverse);
       x0 = Math.min(x0, corner.x); x1 = Math.max(x1, corner.x);
       y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
@@ -304,14 +307,12 @@ export function createDaylight({ scene, renderer }) {
     fill.intensity = p.fillI;
     scene.environmentIntensity = p.envI;
     renderer.toneMappingExposure = p.exposure;
-    // G/F shares the native daylight profile too. Its warm floors and local
-    // pendants supply the interior colour; global light must still follow night.
     uNight.value = p.bake;
     state.night = p.night;
     state.lampsK = p.lamps;
     state.windowsK = p.windows;
     for (const [mat, kind] of tracked) {
-      if (kind === 'lamp') mat.emissiveIntensity = p.lamps * 2.4;
+      if (kind === 'lamp') mat.emissiveIntensity = (lampsEnabled ? p.lamps : 0) * 2.4;
       else if (kind === 'windows') mat.emissiveIntensity = p.windows * 1.7;
     }
     for (const mat of baked) mat.color.setRGB(...p.tint);
@@ -322,10 +323,7 @@ export function createDaylight({ scene, renderer }) {
 
   function updateLamps() {
     const src = lampSource ? lampSource() : null;
-    const k = src ? src.k * state.lampsK : 0;
-    // The expanded lobby is physically lit and has no baked pendant pools.
-    // Its three owned area pendants follow the exact native night transition.
-    building?.overview?.setLobbyLightLevel?.(building?.activeSlot?.kind==='overview'?k:0);
+    const k = lampsEnabled && src ? src.k * state.lampsK : 0;
     for (let i = 0; i < LAMP_COUNT; i++) {
       const l = lamps[i];
       const pos = src && src.positions[i];
@@ -362,6 +360,18 @@ export function createDaylight({ scene, renderer }) {
     track(mat, kind) { tracked.set(mat, kind); },
     untrack(mat) { tracked.delete(mat); },
     setLampSource(fn) { lampSource = fn; },
+    setQuality(q) {
+      if (q.lamps != null) lampsEnabled = !!q.lamps;
+      if (q.shadow == null) return;
+      const size = q.shadow === 1024 ? 1024 : q.shadow === 2048 ? 2048 : 0;
+      sun.castShadow = size > 0;
+      if (size) sun.shadow.mapSize.setScalar(size);
+      const current = sun.shadow.map;
+      if (!sun.castShadow || (current && current.width !== size)) {
+        current?.dispose();
+        sun.shadow.map = null;
+      }
+    },
     setBuilding(b) { building = b; lastScan = -1e9; },
     get shadowOpacity() { return cur ? cur.shadow : 0.3; },
     get night() { return state.night; },

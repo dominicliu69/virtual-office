@@ -57,7 +57,7 @@ class Commands:
         self.reconcile()
         # A restarted Office no longer owns an in-flight ACP request. Preserve
         # the uncertainty and history; never replay a possibly executed prompt.
-        self.db.execute("UPDATE commands SET state='delivery_unknown',payload=NULL,detail_code='interrupted_delivery',updated_at=? WHERE adapter='hermes_acp' AND state IN ('queued','running','waiting_user')", (timestamp(),))
+        self.db.execute("UPDATE commands SET state='delivery_unknown',payload=NULL,detail_code='interrupted_delivery',updated_at=? WHERE adapter IN ('hermes_acp','cursor_local') AND state IN ('queued','running','waiting_user')", (timestamp(),))
         self.db.commit()
 
     def restore_observations(self):
@@ -102,7 +102,7 @@ class Commands:
 
     def allowed(self, agent):
         selected='agents' not in self.config or any(a['id']==agent for a in self.config['agents'])
-        return self.enabled and selected and agent not in self.config.get('disabled_command_agents',[])
+        return self.enabled and selected and agent not in self.config.get('disabled_command_agents',[]) and agent not in self.config.get('archived_agent_ids',[]) and agent not in self.config.get('cursor_cloud_away_ids',[])
 
     def capability(self, agent):
         binding = self.binding(agent)
@@ -121,7 +121,7 @@ class Commands:
                 'mode': getattr(adapter,'mode','queue'), 'connected':bool(binding),
                 'same_session': bool(binding) and getattr(adapter,'same_session',True),
                 'persistent':bool(binding),'requires_active_turn':False,
-                'reason': None if ready else 'not_connected' if not binding else
+                'reason': 'cursor_cloud_away' if agent in self.config.get('cursor_cloud_away_ids',[]) else 'cursor_local_archived' if agent in self.config.get('archived_agent_ids',[]) else None if ready else 'not_connected' if not binding else
                 'dispatch_disabled' if not enabled else getattr(adapter, 'reason', 'adapter_unavailable')})
 
     def _connection_capability(self, agent, capability):
@@ -175,7 +175,64 @@ class Commands:
             row = self.db.execute('SELECT * FROM commands WHERE id=?', (ident,)).fetchone()
             if binding['adapter']=='agent_inbox':
                 self.history.message(agent,ident,'user','prompt',row['preview'],event_id='inbox:'+ident+':prompt')
-            return {'command': self.public(row), 'duplicate': False}
+            result = {'command': self.public(row), 'duplicate': False}
+        return result
+
+    def interrupt_active(self, agent):
+        """Stop a local Cursor run only so an already queued follow-up can go out."""
+        binding = self.binding(agent)
+        if binding and binding['adapter'] == 'cursor_cloud':
+            return self.release_unconfirmed_cloud(agent, binding)
+        if not binding or binding['adapter'] != 'cursor_local':
+            raise CommandError(409, 'not_connected')
+        adapter = self.adapters.get('cursor_local')
+        if not adapter:
+            raise CommandError(409, 'adapter_unavailable')
+        with self.lock:
+            active = self.db.execute(
+                "SELECT 1 FROM commands WHERE agent_id=? AND state IN ('sending','queued','running','waiting_user') LIMIT 1",
+                (agent,)).fetchone()
+            pending = self.db.execute(
+                "SELECT 1 FROM commands WHERE agent_id=? AND state='pending' LIMIT 1",
+                (agent,)).fetchone()
+        if not active or not pending:
+            return {'interrupted': False}
+        adapter.interrupt(binding['session_id'])
+        return {'interrupted': True}
+
+    def release_unconfirmed_cloud(self, agent, binding):
+        """Cancel a lost cloud result only so an already queued follow-up can be sent."""
+        adapter = self.adapters.get('cursor_cloud')
+        if not adapter or not hasattr(adapter, 'cancel_unconfirmed'):
+            raise CommandError(409, 'adapter_unavailable')
+        with self.lock:
+            active = self.db.execute(
+                "SELECT 1 FROM commands WHERE agent_id=? AND state IN ('sending','queued','running','waiting_user') LIMIT 1",
+                (agent,)).fetchone()
+            unknown = self.db.execute(
+                "SELECT id,native_message_id FROM commands WHERE agent_id=? AND session_id=? AND adapter='cursor_cloud' AND state='delivery_unknown' AND native_message_id IS NOT NULL",
+                (agent, binding['session_id'])).fetchall()
+            pending = self.db.execute(
+                "SELECT 1 FROM commands WHERE agent_id=? AND state='pending' LIMIT 1",
+                (agent,)).fetchone()
+        if active or not unknown or not pending:
+            return {'released': False}
+        try:
+            ready = all(adapter.cancel_unconfirmed(binding['session_id'], row['native_message_id']) for row in unknown)
+        except DeliveryError as error:
+            raise CommandError(503, error.code)
+        if not ready:
+            return {'released': False}
+        for row in unknown:
+            adapter.event(binding['session_id'], row['id'], row['native_message_id'], 'finished',
+                state='cancelled', detail_code='cursor_cloud_unconfirmed_released')
+        with self.lock:
+            for row in unknown:
+                self.db.execute(
+                    "UPDATE commands SET state='cancelled',payload=NULL,detail_code='cursor_cloud_unconfirmed_released',updated_at=? WHERE id=? AND agent_id=? AND state='delivery_unknown'",
+                    (timestamp(), row['id'], agent))
+            self.db.commit()
+        return {'released': True}
 
     def list(self, agent):
         with self.lock:
@@ -237,7 +294,14 @@ class Commands:
                 if hasattr(adapter, 'can_dispatch') and not adapter.can_dispatch(candidate['session_id']):
                     continue
                 if getattr(adapter, 'serial', False):
-                    prior = self.db.execute("SELECT 1 FROM commands WHERE agent_id=? AND state IN ('sending','queued','running','waiting_user','delivery_unknown') LIMIT 1", (candidate['agent_id'],)).fetchone()
+                    # A local Cursor run can lose its result when Office restarts.
+                    # That uncertainty must not trap every later message. Hermes and
+                    # Codex still wait, because their unknown delivery must not be replayed.
+                    blocking = ('sending', 'queued', 'running', 'waiting_user')
+                    if candidate['adapter'] != 'cursor_local':
+                        blocking += ('delivery_unknown',)
+                    prior = self.db.execute('SELECT 1 FROM commands WHERE agent_id=? AND state IN (%s) LIMIT 1' % ','.join('?' * len(blocking)),
+                        (candidate['agent_id'], *blocking)).fetchone()
                     if prior:
                         continue
                 row = candidate
@@ -430,7 +494,7 @@ class Commands:
 
     def observe_native(self, agent, event):
         binding = self.bindings.get(agent)
-        if not binding or binding['adapter'] != event.get('adapter','hermes_acp') or binding['adapter'] not in {'hermes_acp','cursor_cloud'} or binding['session_id'] != event.get('session_id'):
+        if not binding or binding['adapter'] != event.get('adapter','hermes_acp') or binding['adapter'] not in {'hermes_acp','cursor_cloud','cursor_local'} or binding['session_id'] != event.get('session_id'):
             return
         run, kind = event['run_id'], event['type']
         definition = next((a for a in self.config['agents'] if a['id'] == agent), None)
@@ -441,7 +505,7 @@ class Commands:
             if not row or row['state'] in TERMINAL:
                 return
             native=event.get('native_run_id')
-            if binding['adapter']=='cursor_cloud':
+            if binding['adapter'] in {'cursor_cloud','cursor_local'}:
                 if not native or (row['native_message_id'] and native!=row['native_message_id']):return
                 if kind=='accepted':
                     self.db.execute("UPDATE commands SET native_message_id=?,state='queued',payload=NULL,updated_at=? WHERE id=? AND state='sending'",(native,timestamp(),run))

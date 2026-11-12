@@ -88,18 +88,25 @@ python3 office.py --config /absolute/path/to/config.json configure --cursor-publ
 
 接駁需要 Cursor 的明文結構化公開訊息資料及支援 JSON 的 SQLite；不讀取或解密帳戶憑證／加密內容。資料庫換檔會跳過該輪，再重新驗證身份。來源格式不支援、關係不明或正文尚未落盤時，不補造文字或完成狀態。此版每輪候選查詢上限 128 個子回合；原生完成後若結尾仍是工具／思考等非公開框架，交付正文保持未確認，公開對話仍按已驗證內容保存。其他 Cursor 版本及自訂環境需另行實測。
 
+## 本機 Agent（SDK）
+
+用 Cursor 的第一步係在 OFFICE 這部電腦安裝官方 Python SDK。未安裝時，「＋ 新對話」會停住，API key 也不會保存：
+
+```sh
+pip install cursor-sdk
+```
+
+Cursor 雙向唔使 webhook，亦唔使把文字打入而家開住嘅 IDE 側欄。裝好 SDK 之後：
+
+1. 撳「＋ 新對話」。API key 只填一次，寫入 `.office/`。再填資料夾絕對路徑。
+2. 程式 `Agent.create(local cwd)`，記住回傳的 `agent-…`。這次以及之後的封存或重開，會用同一條 key 對一次未封存的 Cloud Agent。沒有這些操作時不會定時查名單。
+3. 之後在頭頂對話打字，程式 `Agent.resume` 再 `agent.send`。公開 assistant 文字串流返同一個氣泡；思考同工具原文唔保存。
+
+這條本機 session 由 OFFICE 持有，跑在本機工作目錄。重啟之後未完成的一次傳送會標成結果未確認，唔會自動重送。模型預設 `composer-2.5`。
+
 ## Cloud Agent 背景派工路由
 
-這個 adapter 使用 Cursor 官方 Cloud Agents API v1。使用者從 Desktop 的 Agents 視窗選一個 Cloud Agent，OFFICE 向同一個 `bc-…` Agent 發送 follow-up，保留它的對話與工作環境。沒有另開 CLI session，沒有操作或彈出 Desktop 視窗。
-
-## 一次安裝，自己選擇 Agent
-
-1. 在 OFFICE 按「＋ 邀請 Agent」，選「Cursor Desktop · Cloud Agent」。
-2. 填顯示名稱、該 Agent 的 `https://cursor.com/agents/bc-…` 連結；首次填自己的 Cursor API key。Key 請直接填在本機 OFFICE，毋須傳給開發者或貼進聊天。
-3. 按「接入這個 Cloud Agent」。OFFICE 只讀取指定 Agent 的資料，驗證 ID 及可用狀態，不掃描帳戶名單、不新增 Agent、不呼叫模型。
-4. 點角色頭頂對話，輸入第一項指示。公開文字會同步到 OFFICE，最終回覆與紀錄保存在本機。
-
-同一個 OFFICE 安裝會重用已保存的帳戶 key；再選其他 Agent 時可留空 key。每位成員仍由使用者明確選定，毋須編輯 Python 或 JSON，亦不用重啟服務。原 Agent 的平台登入、權限及計費仍適用。
+這個 adapter 仍在程式裡，使用 Cursor 官方 Cloud Agents API v1。邀請視窗已經不再提供「Cloud Agent」或「本機聊天」選項，新的 Cursor 入場只走本機 Agent。已保存的 Cloud 路由仍可由程式讀取，不會從邀請表單再開一條。
 
 ## 支援邊界
 
@@ -108,6 +115,7 @@ python3 office.py --config /absolute/path/to/config.json configure --cursor-publ
 | Desktop 執行環境 | OFFICE 支援 |
 | --- | --- |
 | Cloud Agent，具有 `bc-…` ID，帳戶允許官方 API | 指示、背景執行、串流公開回覆、最終交付及歷史 |
+| Local SDK Agent，本機 `agent-…`，已安裝 `cursor-sdk` | 指示、同一條 session 續接、串流公開回覆、最終交付及歷史。唔係 IDE 側欄聊天 |
 | Local／本機聊天，只有本機 conversation ID | 可設定上面的原生父子觀察 Hook；仍未有已驗證的原聊天背景指令入口 |
 | 本機子 Agent | 已驗證原生身份、狀態、公開進度、交付正文及歷史；追加工作由父 Agent 處理 |
 | Cloud 子 Agent，只允許父 Agent 操作 | 以官方 API 拒絕為準；應由使用者選父 Agent，不能以本機 Hook 驗證替代 Cloud 路由驗證 |

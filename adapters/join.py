@@ -65,7 +65,7 @@ def normalized_observation(conversation, agent_id=None):
     capability=conversation.get('capability',{})
     local_cursor=(isinstance(identity,str) and identity.startswith('cursor:')
         and capability.get('mode')!='cursor_cloud')
-    if not local_cursor:return None
+    if not local_cursor or 'observation' not in conversation:return None
     states={'setup_required','binding_required','configured','stale','revoked','unsupported'}
     if (not isinstance(observation,dict) or observation.get('method')!='native_hook' or
             observation.get('agent_id')!=identity or observation.get('state') not in states or

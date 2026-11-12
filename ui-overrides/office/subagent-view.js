@@ -4,7 +4,7 @@ export const isObservedChild = bot => bot?.is_subagent === true;
 export const memberBots = bots => bots.filter(bot => !isObservedChild(bot));
 export const childVisualId = agent => 'subagent:' + String(typeof agent === 'string' ? agent : agent.id);
 export const canManageAgent = bot => !!bot?.agent_id && !isObservedChild(bot);
-export const childEvidenceLabel = bot => ({native_hook:'原生事件同步',native_metadata:'原生紀錄同步',parent_reported:'Agent 合作回報'}[bot?.evidence] || '');
+export const childEvidenceLabel = bot => ({native_hook:'原生事件同步',native_metadata:'原生紀錄同步',parent_reported:'Agent 合作回報',cursor_sdk:'本機 Cursor 子 Agent'}[bot?.evidence] || '');
 
 export function withObservedSubagents(state, agents, historyUrl) {
   const bots = Object.fromEntries(Object.entries(state.bots).filter(([,bot]) => !isObservedChild(bot)));

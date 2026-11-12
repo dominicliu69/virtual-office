@@ -244,8 +244,10 @@ class CursorCloudAdapter:
             raise DeliveryError('cursor_api_key_required')
         if not self.can_dispatch(sid):
             raise DeliveryError('platform_agent_busy')
+        # The office id stays on the local receipt. Cursor's own transcript must
+        # show the user's sentence, because other devices sync that transcript.
         try:
-            value = self.transport.json('POST', self.base + sid + '/runs', self.headers(sid), {'prompt':{'text':text}})
+            value = self.transport.json('POST', self.base + sid + '/runs', self.headers(sid), {'prompt':{'text':text[match.end():]}})
         except RemoteError as error:
             raise DeliveryError(error.code, error.uncertain)
         run = value.get('run', {})
@@ -258,6 +260,25 @@ class CursorCloudAdapter:
         self.event(sid, command, native, 'accepted')
         self.resume(sid, command, native, text)
         return {'native_message_id':native, 'delivery_mode':self.mode}
+
+    def cancel_unconfirmed(self, sid, native):
+        """Cancel a cloud run whose result the office lost. True only when it has ended."""
+        if not isinstance(native, str) or not CURSOR_RUN.fullmatch(native) or not self.available(sid):
+            raise DeliveryError('cursor_api_key_required')
+        url = self.base + sid + '/runs/' + native
+        try:
+            self.transport.json('POST', url + '/cancel', self.headers(sid))
+        except RemoteError as error:
+            # Cancel of an already finished run is 409. Any other failure stays unconfirmed.
+            if error.code != 'platform_agent_busy':
+                raise DeliveryError(error.code, error.uncertain)
+        try:
+            value = self.transport.json('GET', url, self.headers(sid))
+        except RemoteError as error:
+            raise DeliveryError(error.code, error.uncertain)
+        if value.get('id') != native or value.get('agentId') != sid:
+            raise DeliveryError('cursor_run_mismatch')
+        return value.get('status') in {'FINISHED', 'ERROR', 'CANCELLED', 'EXPIRED'}
 
     def resume(self, sid, command, native, text, recovery=False, last_segment=0):
         if not isinstance(native, str) or not CURSOR_RUN.fullmatch(native) or not self.available(sid):

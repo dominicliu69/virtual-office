@@ -44,7 +44,7 @@ def capability(config, agent_id, binding=None, observer=None):
                           'configured' if active else 'setup_required',
                           configured=active, automatic=active, manual_app_automatic=active,
                           reason=None if active else 'native_observer_not_bound')
-    if adapter in {'hermes_acp', 'cursor_cloud'}:
+    if adapter in {'hermes_acp', 'cursor_cloud', 'cursor_local'}:
         return descriptor('native_run_observer', 'office_dispatched_runs', 'limited',
                           configured=True, automatic=True, reason='office_runs_only')
     if driver == 'crouton':

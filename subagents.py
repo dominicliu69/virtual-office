@@ -126,7 +126,7 @@ class ChildTail:
     def read(self, max_bytes=FILE_BYTES):
         if not self.path.is_absolute() or self.path.resolve() != self.path:
             raise ValueError('invalid_child_path')
-        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(self.path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
         with os.fdopen(fd, 'rb') as file:
             info = os.fstat(file.fileno())
             if not stat.S_ISREG(info.st_mode) or (self.inode is not None and (self.inode != info.st_ino or info.st_size < self.offset)):

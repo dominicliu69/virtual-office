@@ -8,12 +8,16 @@ import { initSimpleMode } from './simple-mode.js';
 import {officePost} from './office-api.js';
 import {controlError,chooseDesk} from './office-controls.js';
 import {canManageAgent} from './subagent-view.js';
+import {mountComposerDock} from './commands.js';
+import {noteAssistant,rememberSeq,markRead,hasUnread} from './office-read.js';
 
 const POLL_MS = 1000;
 const view = { currentFloor: null, selectedBot: null, simpleMode: false };
 let state = null;
 let ui = { initUI() {}, renderUI() {} };
 let demoTimer = null;
+let focusComposer = false;
+let selectedAgentId = null;
 
 // Wallpaper mode (?mode=wallpaper, for Lively): office full screen + one status line, no interaction except hover.
 //   &floor=<id>   pin the floor (default: the floor with the most bots)
@@ -21,6 +25,7 @@ let demoTimer = null;
 const params = new URLSearchParams(location.search);
 const WALLPAPER = params.get('mode') === 'wallpaper';
 if (WALLPAPER) document.documentElement.classList.add('wallpaper');
+const composerDock = WALLPAPER ? null : mountComposerDock();
 
 try {
   ui = await import(WALLPAPER ? './wallpaper.js' : './ui/ui.js');
@@ -66,6 +71,8 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape') select(null); });
 function select(id) {
   const before = view.selectedBot;
   view.selectedBot = id && state?.bots[id] ? id : null;
+  selectedAgentId = view.selectedBot ? state.bots[view.selectedBot].agent_id || null : null;
+  focusComposer = !!view.selectedBot;
   if (view.selectedBot !== before) sfx.select(!!view.selectedBot);
   if (view.selectedBot) {
     const bot = state.bots[view.selectedBot];
@@ -119,11 +126,27 @@ function render() {
   if (!state) return;
   if (view.simpleMode && state.floors.some(f => f.id === GROUND_ID)) view.currentFloor = GROUND_ID;
   if (!view.currentFloor || !state.floors.some((f) => f.id === view.currentFloor)) view.currentFloor = pickDefaultFloor();
+  if (view.selectedBot && !state.bots[view.selectedBot] && selectedAgentId) {
+    const found = Object.entries(state.bots).find(([, bot]) => bot.agent_id === selectedAgentId);
+    view.selectedBot = found ? found[0] : null;
+  }
   if (view.selectedBot && !state.bots[view.selectedBot]) view.selectedBot = null;
+  selectedAgentId = view.selectedBot ? state.bots[view.selectedBot].agent_id || null : null;
+  const open = view.selectedBot ? state.bots[view.selectedBot] : null;
+  for (const bot of Object.values(state.bots)) {
+    if (bot.latest_message?.role === 'assistant') noteAssistant(bot.agent_id, bot.latest_message.seq);
+  }
+  if (open?.agent_id) {
+    if (open.latest_message?.role === 'assistant') rememberSeq(open.agent_id, open.latest_message.seq);
+    markRead(open.agent_id);
+  }
+  for (const bot of Object.values(state.bots)) bot.unread = bot !== open && hasUnread(bot.agent_id);
   if (view.selectedBot) view.currentFloor = selectionFloor(state,view.currentFloor,view.selectedBot);
   document.documentElement.classList.toggle('office-ground-view',isGround(view.currentFloor));
   renderScene(state, view);
   ui.renderUI(state, view);
+  composerDock?.sync(view.selectedBot ? state.bots[view.selectedBot] : null, focusComposer);
+  focusComposer = false;
   if (!WALLPAPER) soundStatusChanges();
 }
 

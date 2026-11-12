@@ -8,6 +8,7 @@ import { loadOfficeAssets } from './office.js';
 import { Building } from './building.js';
 import { createDaylight } from './daylight.js';
 import { createPost } from './post.js';
+import { renderSettings, onRenderSettings } from './render-settings.js';
 import { studioCss } from './studio.js';
 import { Actor } from './actor.js';
 import { generateBlob } from './blobgen.js';
@@ -16,7 +17,7 @@ import { attachPlatformModel } from './platform-controller.js';
 import { Spring, clamp } from './spring.js';
 import { sofiaHour, fontsPromise } from './walls.js';
 import { isGround } from '../overview.js';
-import {requiredMainSeats,resolveSeats,nearestDesk} from '../seating.js';
+import {requiredMainSeats,nearestDesk} from '../seating.js';
 import {isObservedChild,memberBots,followerSlots,canManageAgent} from '../subagent-view.js';
 import {layoutHeadLabels,headOpenAction} from './dialogue-layout.js';
 
@@ -67,12 +68,40 @@ const childLinks=new Map();
 const WALLPAPER = new URLSearchParams(location.search).get('mode') === 'wallpaper';
 const WALLPAPER_TAGS = new URLSearchParams(location.search).get('tags') === '1';
 const WALLPAPER_FRAME_MS = 1000 / 30;
+const REST_FRAME_MS = 1000 / 20;                 // breath, blink, and sub-step daylight: one frame per 50 ms
+const COLOR_STEP = 1 / 255;                      // one 8-bit step; smaller light changes stay on the last frame
+const pace = { presents: 0, held: 0, mode: 'full', lastPresent: 0 };
+let forcePresent = false;
+let drawnLight = null;
 const WALLPAPER_FRAMING = 0.9;                        // < 1 = closer: the side panels' space is not needed, so the tower fills more
 const TEST = (() => {
   const q = new URLSearchParams(location.search);
   return { floor: WALLPAPER ? null : q.get('floor'), from: q.get('from'), intro: q.get('intro'), hold: q.has('hold') ? Number(q.get('hold')) : null, cam: q.get('cam'), cursor: q.get('cursor') };
 })();
 let frozen = false, pinCursor = false;
+
+// The GLB keeps its lightmaps inside the file. Three asks the browser to fetch those blob: addresses.
+// This local page rejects that fetch, so the original floor, wall and window maps never appear.
+// Hand the same bytes back. The office model itself is unchanged.
+const glbBlobs = new Map();
+const createObjectURL = URL.createObjectURL.bind(URL);
+const revokeObjectURL = URL.revokeObjectURL.bind(URL);
+URL.createObjectURL = (object) => {
+  const url = createObjectURL(object);
+  if (object instanceof Blob) glbBlobs.set(url, object);
+  return url;
+};
+URL.revokeObjectURL = (url) => {
+  glbBlobs.delete(url);
+  revokeObjectURL(url);
+};
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  const blob = glbBlobs.get(url);
+  if (!blob) return nativeFetch(input, init);
+  return Promise.resolve(new Response(blob.slice(0, blob.size, blob.type), { status: 200, statusText: 'OK' }));
+};
 
 // The office GLB is the biggest download: start it the moment this module runs (index.html may have preloaded it
 // already; the loader then reuses that response), not after the renderer and the UI are set up.
@@ -97,7 +126,7 @@ export function initScene(el, cbs = {}) {
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
   // the post chain (MSAA, half-float) is capped at 1.5x: soft by design, and it keeps VRAM and fill cost sane
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * renderSettings().scale);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -141,10 +170,13 @@ export function initScene(el, cbs = {}) {
   addEventListener('keydown',event=>{if(event.key==='Escape'&&drag?.actorId){cancelSeatDrag();drag=null;}});
   new ResizeObserver(resize).observe(container);
   resize();
-  renderer.setAnimationLoop(frame);
+  renderer.setAnimationLoop(null);
+  onRenderSettings(applyRenderSettings);
+  kick();
 
   window.bothq = Object.assign(window.bothq || {}, {
     scene: { get camera() { return camera; }, get building() { return building; }, cam, actors, get daylight() { return daylight; }, switchFloor: (id) => building && switchFloor(id, false), settle },
+    pace,
   });
 }
 
@@ -187,22 +219,22 @@ function sync() {
 
   const maxShare = Math.max(0.0001, ...floorBots.map((b) => b.usage_share || 0));
   const members=memberBots(floorBots);
-  const lounge = overview?new Map():assignLounge(members);
-  groundSeats=overview?resolveSeats(members,inst.spots):new Map();
+  const lounge = assignLounge(members);
+  groundSeats=new Map();
   const rootSpots=new Map(),spots=new Map();
   for(const bot of members){
-    const deskIdx=overview?inst.spots.indexOf(groundSeats.get(bot.id)):(DESK_ORDER[(bot.desk || 1)-1] || 1)-1;
-    const desk=overview?inst.spots[deskIdx]:assets.spots.desks[deskIdx] || assets.spots.desks[0];
+    const deskIdx=(DESK_ORDER[(bot.desk || 1)-1] || 1)-1;
+    const desk=assets.spots.desks[deskIdx] || assets.spots.desks[0];
     const spot=lounge.get(bot.id)||desk;
     if(spot){spots.set(bot.id,spot);rootSpots.set(bot.agent_id,spot);}
   }
   const children=floorBots.filter(isObservedChild);
-  followerPositions=followerSlots(children,rootSpots,panBounds(),followerPositions,overview?inst.spots:assets.spots.desks,view.selectedBot);
+  followerPositions=followerSlots(children,rootSpots,panBounds(),followerPositions,assets.spots.desks,view.selectedBot);
   for(const bot of children){const at=followerPositions.get(bot.id);if(at)spots.set(bot.id,{pos:new THREE.Vector3(at.x,at.y,at.z),yaw:at.yaw,lounge:true,subagent:true});}
   const ids=new Set(spots.keys());
   for(const [id,actor] of actors)if(!ids.has(id)){actor.retire();retiring.add(actor);actors.delete(id);}
   for(const [id,line] of childLinks)if(!ids.has(id)||!spots.has(id)){line.removeFromParent();line.geometry.dispose();line.material.dispose();childLinks.delete(id);}
-  const flags = new Array(overview?inst.spots.length:20).fill(0);
+  const flags = new Array(20).fill(0);
   const delay = Math.max(0, switchedAt + 0.55 - nowSec);
   for (const [index,bot] of floorBots.entries()) {
     const spot=spots.get(bot.id);
@@ -225,7 +257,7 @@ function sync() {
       const line=new THREE.Line(geometry,new THREE.LineBasicMaterial({color:0x84a7ba,transparent:true,opacity:0.38,depthWrite:false}));
       inst.root.add(line);childLinks.set(bot.id,line);
     }
-    const deskIdx = overview?inst.spots.indexOf(groundSeats.get(bot.id)):(DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
+    const deskIdx = (DESK_ORDER[(bot.desk || 1) - 1] || 1) - 1;
     if (!isObservedChild(bot)&&(bot.effective_status || bot.status) === 'working' && !lounge.has(bot.id)&&deskIdx>=0) flags[deskIdx] = 1;
     actor.update(bot, spot, { maxShare, selectedBot: view.selectedBot });
     actor.dialogue.setChildren(children.filter(child=>bot.is_subagent?child.parent_agent_id===bot.agent_id:child.root_agent_id===bot.agent_id));
@@ -312,6 +344,7 @@ function loadModel(id) {
 // ---------- floor switch = elevator ride ----------
 
 function switchFloor(id, first) {
+  kick();
   cancelSeatDrag();drag=null;
   for (const a of actors.values()) { a.retire(); retiring.add(a); }
   actors.clear();
@@ -340,6 +373,7 @@ function hideLoader() {
 // ---------- camera (all on springs) ----------
 
 export function zoom(dir) {
+  kick();
   if (!building) return;
   if (dir === 'reset') {
     const home=homePosition();cam.x.to(home.x); cam.z.to(home.z); cam.y.to(building.activeY + HOME.y); cam.zoom.to(0);
@@ -350,6 +384,7 @@ export function zoom(dir) {
 }
 
 export function focusBot(id) {
+  kick();
   const a = actors.get(id);
   if (!a || !building) return;
   const target=a.spot?.pos||a.root.position;
@@ -378,19 +413,17 @@ function clampTarget() {
 function resize() {
   if (!renderer) return;
   const w = container.clientWidth || 1, h = container.clientHeight || 1;
-  const layout=isGround(building?.activeId)?building.overview.layout:null;
-  const signature=`${w}:${h}:${layout?.width||0}:${layout?.depth||0}`;
+  const signature=`${w}:${h}:${renderer.getPixelRatio()}`;
   if(signature===sizeSignature)return;
   sizeSignature=signature;
+  forcePresent = true;
   renderer.setSize(w, h, false);
   labels.setSize(w, h);
   post?.setSize(w, h);
   const aspect = w / h;
   // phones (the UI's <= 900 px layout) have no side panels to keep clear: the floor fills the width, bots read bigger
   const spanW = WALLPAPER ? VIEW_SPAN.w : VIEW_SPAN.w + (PHONE_SPAN_W - VIEW_SPAN.w) * (1 - clamp((w - 560) / 340, 0, 1));
-  const wide=layout?Math.max(spanW,(layout.width+layout.depth)*.99):spanW;
-  const tall=layout?Math.max(VIEW_SPAN.h,(layout.width+layout.depth)*.59):VIEW_SPAN.h;
-  const halfH = Math.max(tall, wide / aspect) / 2 * (WALLPAPER ? WALLPAPER_FRAMING : 1);
+  const halfH = Math.max(VIEW_SPAN.h, spanW / aspect) / 2 * (WALLPAPER ? WALLPAPER_FRAMING : 1);
   camera.left = -halfH * aspect; camera.right = halfH * aspect;
   camera.top = halfH; camera.bottom = -halfH;
   // keep the building clear of the glass panels: shift the view so its centre is the free space between them
@@ -400,8 +433,8 @@ function resize() {
 }
 
 const pxPerMeter = () => renderer.domElement.clientHeight / ((camera.top - camera.bottom) / camera.zoom);
-const panBounds = ()=>isGround(building?.activeId)?building.overview.layout:{minX:-9.5,maxX:9.5,minZ:-7.5,maxZ:7.5};
-const homePosition=()=>isGround(building?.activeId)?{x:building.overview.layout.center.x,z:building.overview.layout.center.z}:HOME;
+const panBounds = ()=>({minX:-9.5,maxX:9.5,minZ:-7.5,maxZ:7.5});
+const homePosition=()=>HOME;
 
 // ---------- pointer: pan, zoom, hover, click ----------
 
@@ -494,6 +527,7 @@ async function finishSeatMove(current,event){
 }
 
 function onDown(e,forcedId=null) {
+  kick();
   if(seatSaving&&isGround(building?.activeId))return;
   renderer.domElement.setPointerCapture?.(e.pointerId);
   setPointer(e);
@@ -567,6 +601,7 @@ function onUp(e) {
 }
 
 function onWheel(e) {
+  kick();
   e.preventDefault();
   setPointer(e);
   const z0 = Math.exp(cam.zoom.target);
@@ -787,6 +822,78 @@ function layoutDialogues(nowMs) {
   }
 }
 
+function lightNumbers(params) {
+  if (!params) return null;
+  const out = [];
+  for (const value of Object.values(params)) {
+    if (Array.isArray(value)) out.push(...value);
+    else if (typeof value === 'number') out.push(value);
+  }
+  return out;
+}
+
+function lightMoved() {
+  const now = lightNumbers(daylight?.state?.params);
+  if (!now || !drawnLight || now.length !== drawnLight.length) return true;
+  for (let i = 0; i < now.length; i++) if (Math.abs(now[i] - drawnLight[i]) > COLOR_STEP) return true;
+  return false;
+}
+
+function rememberLight() {
+  const now = lightNumbers(daylight?.state?.params);
+  drawnLight = now ? now.slice() : null;
+}
+
+// Dragging, walking and floor changes keep every vsync. Breath, blink and the tail of the daylight blend do not.
+function realMotion() {
+  if (drag || pinch) return true;
+  if (!cam.x.settled || !cam.y.settled || !cam.z.settled || !cam.zoom.settled) return true;
+  if (!building) return true;
+  if (building.pulseT >= 0 || building.introDrop) return true;
+  if (!building.cabinY.settled || !building.shaftTop.settled || !building.roofLift.settled) return true;
+  for (const slot of building.slots) if (!slot.lift.settled) return true;
+  if (effects.length) return true;
+  for (const actor of actors.values()) {
+    if (actor.anim || actor.dragPosition) return true;
+    if (!actor.yawS.settled || !actor.scaleS.settled || !actor.eyeX.settled || !actor.eyeY.settled) return true;
+  }
+  for (const actor of retiring) if (!actor.dead) return true;
+  return false;
+}
+
+function restingMotion() {
+  if (actors.size || retiring.size) return true;
+  return lightMoved();
+}
+
+function applyRenderSettings(q) {
+  if (!renderer) return;
+  const ratio = Math.min(devicePixelRatio || 1, 1.5) * q.scale;
+  if (Math.abs(renderer.getPixelRatio() - ratio) > 1e-4) {
+    renderer.setPixelRatio(ratio);
+    sizeSignature = '';
+    resize();
+  }
+  post?.setSamples(q.aa);
+  post?.setTilt(q.tilt);
+  post?.setAura(q.aura);
+  daylight?.setQuality(q);
+  forcePresent = true;
+  kick();
+}
+
+let loopArmed = false;
+function kick() {
+  if (loopArmed) return;
+  loopArmed = true;
+  requestAnimationFrame(onFrame);
+}
+function onFrame(t) {
+  frame(t);
+  if (pace.mode === 'hold') { loopArmed = false; setTimeout(kick, 200); }
+  else requestAnimationFrame(onFrame);
+}
+
 function frame(t) {
   if (document.hidden) { clock.getDelta(); return; }       // no work in a background tab
   if (WALLPAPER) {                                          // <= 30 fps: skip the in-between vsyncs; dt keeps real time
@@ -816,6 +923,17 @@ function frame(t) {
   }
   stepEffects(dt);
 
+  let draw = true;
+  if (forcePresent) { forcePresent = false; pace.mode = 'full'; }
+  else if (realMotion()) pace.mode = 'full';
+  else if (!restingMotion()) { pace.mode = 'hold'; pace.held++; draw = false; }
+  else if (t - pace.lastPresent < REST_FRAME_MS - 2) { pace.mode = 'rest'; pace.held++; draw = false; }
+  else pace.mode = 'rest';
+  if (!draw) return;
+
+  pace.presents++;
+  pace.lastPresent = t;
+  rememberLight();
   if (post) {
     focusV.set(0, (building ? building.cabinY.x : 0) + 0.7, 0).project(camera);
     post.render(clamp(focusV.y * 0.5 + 0.5, 0, 1), dt, clamp(1.5 / camera.zoom, 0.25, 1));

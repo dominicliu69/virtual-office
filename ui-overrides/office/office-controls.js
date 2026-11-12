@@ -17,6 +17,22 @@ function shell(title){
   return {dialog,heading,description,notice,actions,cancel};
 }
 
+export function archiveCursor(bot){
+  const mode=bot.command_capability?.mode;
+  if(!canManageAgent(bot)||(mode!=='cursor_local'&&mode!=='cursor_cloud'))return;
+  const ui=shell('封存 '+bot.name);
+  ui.description.textContent=mode==='cursor_cloud'
+    ?'呢條 Cloud Agent 會離開辦公室。Cursor 上唔會封存，之後可以喺「新對話」再開同一條。'
+    :'呢條對話會離開辦公室。紀錄同呢條 session 會留住，之後可以喺「新對話」再開同一條。';
+  const submit=document.createElement('button');submit.type='button';submit.className='office-agent-danger';submit.textContent='確認封存';ui.actions.append(submit);
+  submit.addEventListener('click',async()=>{
+    submit.disabled=true;ui.cancel.disabled=true;ui.notice.textContent='正在封存…';
+    try{await officePost('/api/office/connections/cursor-local',key(),{action:'archive',agent_id:bot.agent_id});window.dispatchEvent(new CustomEvent('office:refresh'));ui.dialog.close();}
+    catch(error){ui.notice.textContent=controlError(error);submit.disabled=false;ui.cancel.disabled=false;}
+  });
+  ui.dialog.showModal();ui.cancel.focus();
+}
+
 export function logoutAgent(bot){
   if(!canManageAgent(bot))return;
   const ui=shell('登出 '+bot.name);ui.description.textContent='讓這位 Agent 離開 OFFICE。交付歷史會保留；未開始的留言會取消，原 App 的聊天仍可繼續使用。';

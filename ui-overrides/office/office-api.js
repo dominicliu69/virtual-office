@@ -15,7 +15,7 @@ export async function officeGet(path, key) {
   return response.json();
 }
 export async function officePost(path, key, body) {
-  if (!['/api/office/commands','/api/office/commands/cancel','/api/office/permissions','/api/office/agents/logout','/api/office/seating'].includes(path)) throw new Error('Invalid command endpoint');
+  if (!['/api/office/commands','/api/office/commands/cancel','/api/office/commands/interrupt','/api/office/permissions','/api/office/agents/logout','/api/office/agents/rename','/api/office/seating','/api/office/connections/cursor-local'].includes(path)) throw new Error('Invalid command endpoint');
   const response=await fetch(path,{method:'POST',cache:'no-store',credentials:'same-origin',
     headers:{'X-Office-Key':key,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
   const data=await response.json();

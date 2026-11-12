@@ -67,7 +67,7 @@ def atomic_json(path, data):
 
 
 def bounded_json(path, limit=256 * 1024):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
     with os.fdopen(fd) as f:
         s = os.fstat(f.fileno())
         if not stat.S_ISREG(s.st_mode) or s.st_size > limit:
@@ -168,7 +168,7 @@ class CodexTail:
         return {'status': self.state[0], 'step': self.state[1], 'source_time': rec.get('timestamp'), 'run_id':self.run}
 
     def read(self):
-        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(self.path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
         with os.fdopen(fd, 'rb') as f:
             s = os.fstat(f.fileno())
             if not stat.S_ISREG(s.st_mode):
@@ -351,7 +351,7 @@ class Bridge:
         self.child_events = ChildEvents(self)
         # Redaction includes only explicitly configured platform credentials.
         from platform_adapters import secret_file
-        for kind in ('cursor_cloud','grok_webhook'):
+        for kind in ('cursor_cloud','cursor_local','grok_webhook'):
             for settings in config.get('command_adapters',{}).get(kind,{}).get('sessions',{}).values():
                 try:
                     secrets=secret_file(settings['credential_file'])
@@ -368,6 +368,8 @@ class Bridge:
         elif kind in {'finished','interrupted'}:
             status={'completed':'done','failed':'error','cancelled':'idle','delivery_unknown':'waiting_user'}[event['state']]
             step={'done':'已完成','error':label+' 執行失敗；請查看紀錄','idle':'已中止','waiting_user':'執行結果未確認；不會自動重送'}[status]
+            if status=='done' and self.commands.bindings.get(agent,{}).get('adapter')=='cursor_local':
+                status,step='idle','沒有進行中的工作'
         self.report(info['name'],{'status':status,'step':step,'run_id':event['run_id']},info['provider'],agent_id=agent)
 
     def get_connection_checks(self):
@@ -420,17 +422,20 @@ class Bridge:
         for a in config['agents']:
             if a['id'] not in self.definitions:
                 self.activate_push_agent(a)
-            if a['driver']=='cursor':
+            if a['driver']=='cursor' and config.get('command_bindings',{}).get(a['id'],{}).get('adapter')=='cursor_cloud':
                 self.agents[a['id']]['native_url']='https://cursor.com/agents/'+a['source_id']
                 if a['name'] not in self.sources or self.sources[a['name']].get('step')=='等待 Agent 首次回報':
                     with self.commands.lock:
                         previous=self.commands.db.execute('SELECT state FROM commands WHERE agent_id=? ORDER BY created_at DESC LIMIT 1',(a['id'],)).fetchone()
                     pending=previous and previous['state'] in {'queued','running','waiting_user','delivery_unknown'}
                     self.sources[a['name']]={'status':'waiting_user' if pending else 'idle','step':'正在恢復原生執行紀錄' if pending else 'Cursor 已接入；等待 OFFICE 指示','provider':'cursor','observed_at':utc(),'changed_at':utc()}
+            if a['driver']=='cursor' and config.get('command_bindings',{}).get(a['id'],{}).get('adapter')=='cursor_local':
+                if a['name'] not in self.sources:
+                    self.sources[a['name']]={'status':'idle','step':'沒有進行中的工作','provider':'cursor','observed_at':utc(),'changed_at':utc()}
         self.config['agents']=config['agents']
         self.config['command_bindings']=config.get('command_bindings',{})
         self.config['command_adapters']=config.get('command_adapters',{})
-        for key in ('disabled_command_agents','logged_out_agent_ids','revoked_invitation_ids'):
+        for key in ('disabled_command_agents','logged_out_agent_ids','revoked_invitation_ids','archived_agent_ids','cursor_cloud_away_ids'):
             self.config[key]=config.get(key,[])
         self.commands.bindings=self.config['command_bindings']
         self.commands.migrate_pending_inbox()
@@ -442,7 +447,7 @@ class Bridge:
         self.crouton_names={a['source_id']:a['name'] for a in config['agents'] if a['driver']=='crouton'}
         for sid,a in self.codex_targets.items():
             self.agents[a['id']]['native_url']='codex://threads/'+sid
-        for key in ('cursor_cloud','grok_webhook'):
+        for key in ('cursor_cloud','cursor_local','grok_webhook'):
             adapter=self.commands.adapters.get(key)
             if adapter:adapter.sessions=self.config['command_adapters'].get(key,{}).get('sessions',{})
         self.members.sync(config)
@@ -613,7 +618,9 @@ class Bridge:
         seating=self.members.snapshot() if hasattr(self,'members') else {'placements':{},'revision':0}
         catalog = self.workspaces.catalog()
         latest = self.history.latest_messages(self.agents)
+        archived=set(self.config.get('archived_agent_ids',[])) | set(self.config.get('cursor_cloud_away_ids',[]))
         for info in self.agents.values():
+            if info['id'] in archived:continue
             source = self.sources.get(info['name'], {})
             message = latest.get(info['id'])
             if message and source.get('run_id') and message['run_id'] != source['run_id']:
@@ -628,6 +635,9 @@ class Bridge:
                                state_changed_at=source.get('changed_at'),
                                latest_message=message))
         child_agents=self.children.snapshot({a['id']:a for a in agents}) if hasattr(self,'children') else []
+        local=self.commands.adapters.get('cursor_local') if hasattr(self,'commands') else None
+        if local and hasattr(local,'subagent_snapshot'):
+            child_agents=child_agents+local.subagent_snapshot({a['id']:a for a in agents})
         for agent in agents:
             agent['child_count']=sum(c['root_agent_id']==agent['id'] for c in child_agents)
         finished=self.history.list(self.history_agents(), terminal=True)
@@ -928,7 +938,6 @@ class Bridge:
         state = self.status()
         atomic_json(self.run_dir / 'result.json', state)
 
-
 def proxy_handler(bridge):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -1122,21 +1131,25 @@ def proxy_handler(bridge):
                 except CommandError as error:return self.small(error.status,{'error':error.code})
                 except (ValueError,KeyError,TypeError):return self.small(400,{'error':'invalid_connection_check'})
                 except (OSError,sqlite3.Error):return self.small(503,{'error':'connection_check_unavailable'})
-            if route in {'/api/office/connections/cursor','/api/office/connections/grok'}:
+            if route in {'/api/office/connections/cursor','/api/office/connections/cursor-local','/api/office/connections/cursor-cloud','/api/office/connections/grok'}:
                 if not hmac.compare_digest(self.headers.get('X-Office-Key',''),bridge.config['topic']):
                     self.close_connection=True
                     return self.small(403,{'error':'private_office_required'})
                 from connections import ConnectionError
                 try:
                     length=int(self.headers.get('Content-Length','0'))
-                    if self.headers.get('Transfer-Encoding') or self.headers.get_content_type()!='application/json' or not 0<length<=16000:raise ValueError()
+                    limit=32000 if route.endswith('/cursor-cloud') else 16000
+                    if self.headers.get('Transfer-Encoding') or self.headers.get_content_type()!='application/json' or not 0<length<=limit:raise ValueError()
                     data=json.loads(self.rfile.read(length))
-                    result=bridge.connections.connect_cursor(data) if route.endswith('/cursor') else bridge.connections.connect_grok(data)
+                    if route.endswith('/cursor-cloud'):result=bridge.connections.create_cursor_cloud(data)
+                    elif route.endswith('/cursor-local'):result=bridge.connections.connect_cursor_local(data)
+                    elif route.endswith('/cursor'):result=bridge.connections.connect_cursor(data)
+                    else:result=bridge.connections.connect_grok(data)
                     return self.small(200,result)
                 except ConnectionError as error:return self.small(error.status,{'error':error.code})
                 except (ValueError,KeyError,TypeError):return self.small(400,{'error':'invalid_connection'})
                 except (OSError,sqlite3.Error):return self.small(503,{'error':'connection_unavailable'})
-            if route in {'/api/office/commands','/api/office/permissions','/api/office/commands/cancel','/api/office/commands/reconcile'}:
+            if route in {'/api/office/commands','/api/office/permissions','/api/office/commands/cancel','/api/office/commands/interrupt','/api/office/commands/reconcile','/api/office/agents/rename'}:
                 if not hmac.compare_digest(self.headers.get('X-Office-Key',''),bridge.config['topic']):
                     self.close_connection=True
                     return self.small(403,{'error':'private_office_required'})
@@ -1148,6 +1161,11 @@ def proxy_handler(bridge):
                     if data['agent_id'] not in bridge.agents:return self.small(404,{'error':'agent_not_selected'})
                     if route=='/api/office/permissions':return self.small(200,bridge.commands.decide(data))
                     if route=='/api/office/commands/cancel':return self.small(200,bridge.commands.cancel_pending(data))
+                    if route=='/api/office/commands/interrupt':return self.small(200,bridge.commands.interrupt_active(data['agent_id']))
+                    if route=='/api/office/agents/rename':
+                        from connections import ConnectionError
+                        try:return self.small(200,bridge.connections.rename_agent(data))
+                        except ConnectionError as error:return self.small(error.status,{'error':error.code})
                     if route=='/api/office/commands/reconcile':
                         with bridge.commands.lock,bridge.history.lock:
                             agent=bridge.definitions.get(data['agent_id'])
@@ -1222,6 +1240,8 @@ def proxy_handler(bridge):
                     return self.small(403, {'error': 'private_office_required'})
                 if u.path == '/api/office/connections':
                     return self.small(200,bridge.connections.status())
+                if u.path == '/api/office/connections/cursor-local':
+                    return self.small(200, bridge.connections.cursor_local_home())
                 if u.path == '/api/office/connections/check':
                     from connection_checks import ConnectionCheckError
                     try:
@@ -1288,7 +1308,7 @@ def proxy_handler(bridge):
                 target = (public / urllib.parse.unquote(u.path).lstrip('/')).resolve()
                 if target.is_dir():
                     target = target / 'index.html'
-                if not str(target).startswith(str(public) + '/') or not target.is_file():
+                if not str(target).startswith(str(public) + os.sep) or not target.is_file():
                     return self.small(404, {'error': 'not_found'})
                 body = target.read_bytes()
                 self.send_response(200)
@@ -1377,7 +1397,7 @@ def main():
     parser.add_argument('--duration', type=int)
     args = parser.parse_args()
     config_path = Path(args.config).expanduser().resolve()
-    if config_path.stat().st_mode & 0o077:
+    if os.name != 'nt' and config_path.stat().st_mode & 0o077:
         raise SystemExit('Private configuration must have mode 0600')
     config = load_config(config_path)
     if not config.get('run_dir'):

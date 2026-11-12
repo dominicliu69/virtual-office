@@ -1,6 +1,6 @@
 import { officeGet, agentPageUrl } from '../office-api.js';
-import { CommandComposer } from '../commands.js';
-import {logoutAgent,chooseDesk} from '../office-controls.js';
+import { workingLine } from '../office-read.js';
+import {logoutAgent,chooseDesk,archiveCursor} from '../office-controls.js';
 import {canManageAgent,childEvidenceLabel} from '../subagent-view.js';
 import {SingleHeadPanel,headStatus} from './dialogue-layout.js';
 
@@ -63,8 +63,7 @@ export class DialogueBubble {
     this.element.querySelector('.speech-toolbar').insertBefore(this.logout,this.element.querySelector('.speech-close'));
     this.move.addEventListener('pointerdown',event=>{if(!canManageAgent(this.bot)||event.button!==0||!document.documentElement.classList.contains('office-ground-view'))return;event.preventDefault();window.dispatchEvent(new CustomEvent('office:agent-drag-start',{detail:{id:this.bot?.id,event}}));});
     this.move.addEventListener('click',event=>{if(canManageAgent(this.bot)&&(event.detail===0||!document.documentElement.classList.contains('office-ground-view')))chooseDesk(this.bot);});
-    this.logout.addEventListener('click',()=>logoutAgent(this.bot));
-    this.composer=new CommandComposer();this.detail.append(this.composer.element);
+    this.logout.addEventListener('click',()=>this.bot?.command_capability?.mode==='cursor_local'||this.bot?.command_capability?.mode==='cursor_cloud'?archiveCursor(this.bot):logoutAgent(this.bot));
     this.list=this.element.querySelector('.speech-messages');this.notice=this.element.querySelector('[role=status]');this.older=this.element.querySelector('.speech-older');
     this.peek.addEventListener('click',()=>{this.setOpen(!this.open);if(this.open)this.onSelect?.();});
     this.element.querySelector('.speech-close').addEventListener('click',()=>{this.setOpen(false);this.peek.focus({preventScroll:true});});
@@ -78,9 +77,9 @@ export class DialogueBubble {
     this.bot=bot;
     this.element.dataset.status=bot.effective_status||bot.status||'waiting_user';
     this.element.classList.toggle('is-subagent',!!bot.is_subagent);
-    this.composer.bind(bot.agent_id,bot.command_capability);
-    this.composer.element.hidden=!!bot.is_subagent;
+    this.element.classList.toggle('is-unread',!!bot.unread);
     this.move.hidden=!canManageAgent(bot);this.logout.hidden=!canManageAgent(bot);
+    this.logout.textContent=bot.command_capability?.mode==='cursor_local'||bot.command_capability?.mode==='cursor_cloud'?'封存':'登出';
     this.element.querySelector('.speech-name').textContent=bot.name;
     const evidence=bot.is_subagent?childEvidenceLabel(bot):'';
     const relation=bot.is_subagent?[`${bot.parent_name||'主 Agent'} 的子 Agent`,evidence].filter(Boolean).join(' · '):'';
@@ -88,8 +87,11 @@ export class DialogueBubble {
     this.peek.title=[bot.name,headStatus(bot.effective_status||bot.status),relation].filter(Boolean).join(' · ');
     this.status.textContent='';this.status.setAttribute('aria-hidden','true');
     this.move.setAttribute('aria-label','移動 '+bot.name+' 的位置');this.logout.setAttribute('aria-label','登出 '+bot.name);
-    this.element.querySelector('.speech-meta').textContent=bot.is_subagent?relation:bot.latest_message ? roleLabel(bot.latest_message,bot) : bot.child_count?`子 Agent · ${bot.child_count}`:'即時對話';
-    this.element.querySelector('.speech-preview').textContent=previewText(bot.latest_message)||'等待公開訊息…';
+    const working=(bot.effective_status||bot.status)==='working';
+    const line=working?workingLine(bot.latest_message?.role==='assistant'?bot.latest_message.text:bot.step):'';
+    this.element.classList.toggle('is-working',!!line);
+    this.element.querySelector('.speech-meta').textContent=bot.is_subagent?relation:line?'工作中':bot.child_count?`子 Agent · ${bot.child_count}`:'即時對話';
+    this.element.querySelector('.speech-preview').textContent=line;
     this.element.querySelector('.speech-history').href=bot.chat_url || '#';
     if(this.selected && !selected)this.closePanels();
     this.selected=selected;
@@ -174,7 +176,6 @@ export class DialogueBubble {
   async refresh(older=false) {
     if(this.pending||!this.open||this.disabled||!this.bot?.agent_id)return;
     const ticket={epoch:this.requestEpoch,agent:this.bot.agent_id};this.pendingRequest=ticket;this.pending=true;
-    this.composer.refresh();
     const agent=this.bot.agent_id;
     try{
       const key=decodeURIComponent(location.hash.slice(1));
@@ -215,7 +216,7 @@ export class DialogueBubble {
     finally{if(this.pendingRequest===ticket){this.pendingRequest=null;this.pending=false;}}
   }
   disable(){
-    this.disabled=true;this.closePanels();this.composer?.dispose?.();
+    this.disabled=true;this.closePanels();
     this.element.inert=true;this.element.setAttribute('aria-hidden','true');this.element.style.display='none';
   }
   dispose(){this.disable();this.element.remove();}

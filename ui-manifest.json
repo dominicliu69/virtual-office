@@ -759,24 +759,7 @@
       "source": "web/scene/daylight.js",
       "destination": "office/scene/daylight.js",
       "source_sha256": "86087d296ea2b4e9b52acbffddb7fd3b1bf64d50873f0cc0bb23e5a68a76effb",
-      "installed_sha256": "562767cc03c6b3741b3b792defb875b74e40a847c7a2aff2860879fdf2864053",
-      "edits": [
-        [
-          263,
-          263,
-          [
-            "    const layout=building?.activeSlot?.kind==='overview'?building.overview.layout:null;\n",
-            "    const room=layout?{...ROOM,x:layout.width/2+.3,z:layout.depth/2+.3}:ROOM;\n"
-          ]
-        ],
-        [
-          274,
-          275,
-          [
-            "      corner.set(centre.x + (i & 1 ? room.x : -room.x), y + (i & 2 ? room.y1 : room.y0), centre.z + (i & 4 ? room.z : -room.z));\n"
-          ]
-        ]
-      ]
+      "installed_sha256": "86087d296ea2b4e9b52acbffddb7fd3b1bf64d50873f0cc0bb23e5a68a76effb"
     },
     {
       "source": "web/scene/floorstyle.js",
@@ -806,7 +789,16 @@
       "source": "web/scene/post.js",
       "destination": "office/scene/post.js",
       "source_sha256": "46c1fa953b307fa1e502f2523b6ed1f836326093933dba9f38f5b2f2f348ff25",
-      "installed_sha256": "46c1fa953b307fa1e502f2523b6ed1f836326093933dba9f38f5b2f2f348ff25"
+      "installed_sha256": "1e68963c70d2c4d19c6992b05dd2b6a5ca6c42c36fb3329afcade6e55e7c9d24",
+      "edits": [
+        [
+          48,
+          49,
+          [
+            "  const rt = new THREE.WebGLRenderTarget(size.x * pr, size.y * pr, { type: THREE.HalfFloatType, samples: 0 });\n"
+          ]
+        ]
+      ]
     },
     {
       "source": "web/scene/scene.css",
@@ -1359,11 +1351,11 @@
   "overrides": [
     {
       "destination": "office/invite.js",
-      "sha256": "58934c824f431fbabc92662951f5af09513316ec5e245b168ade5888be903371"
+      "sha256": "fe94aaeeb9f17f93e180e2f14b00192a8c3caeb0631fc6bd659265d074a243ff"
     },
     {
       "destination": "office/invite.css",
-      "sha256": "d7831e7fe889bae9096e918b4534476a064b43dd9e16def5cee2abc9675389dd"
+      "sha256": "2d6613bc695f03758136dac5a395053df37ad57961054c6acb37d79321e3f671"
     },
     {
       "destination": "office/agent.css",
@@ -1390,20 +1382,16 @@
       "sha256": "d7c1b952d6a246dd6dc8233998576fbfde10ead714b7fca822ab30dcd21a6146"
     },
     {
-      "destination": "office/scene/ground-hall.js",
-      "sha256": "96b355a3c0cd498fd11f0cb29c9bc4ee8cc9a7f316d044d878518d58f06db526"
-    },
-    {
       "destination": "office/scene/dialogue.js",
       "sha256": "07172bd62bf7db75adaa65c1168a6756317b76b486ed5cf7f43eef31350a244d"
     },
     {
       "destination": "office/commands.js",
-      "sha256": "56dc75ec70bdb05660a824a7047c1191c681b54daa53055d6c7d2a1669c9a7dc"
+      "sha256": "66ea3b7b72d53c3f764673a2db7e7b76dab924cb639e3aa8758ba3cf26f454e9"
     },
     {
       "destination": "office/commands.css",
-      "sha256": "ff4812271bcea3dc8b67af0d5ea202fb83267f44ae4109b8d428bf9ee3c8c51b"
+      "sha256": "b8417c4f51073740f0ce6b9dc0cc1ea53e45e0890f262080446e9e81572d7ef0"
     },
     {
       "destination": "office/index.html",
@@ -1419,7 +1407,7 @@
     },
     {
       "destination": "office/simple-mode.css",
-      "sha256": "c28609651837c398192cebf08ef75a56691b192589acb1d63086167b7d43c03c"
+      "sha256": "65d3fe094f573f785e6125e6228e25aadebc320461422d11d2d4c0b360800294"
     },
     {
       "destination": "office/office-controls.js",
@@ -1435,11 +1423,11 @@
     },
     {
       "destination": "office/scene/building.js",
-      "sha256": "c7f053ac8d637cd906a911c98a047fb2a3e7a0722afbbbb9658e77028eb69e97"
+      "sha256": "a4cc5c8af116b72e2cc9051b01c50f1b63b3ab7568132daf5851349094042df1"
     },
     {
       "destination": "office/scene/scene.js",
-      "sha256": "ba723e82508bdb2638de3421c13a1e4b1c39ab3fa78bee6154e3012fa4014263"
+      "sha256": "4d92d33d872f245ac59e2ffaae46441d3a656f9bbdc4e40c1c4a940199f8fc6f"
     },
     {
       "destination": "office/scene/actor.js",
@@ -1451,15 +1439,11 @@
     },
     {
       "destination": "office/ui/ui.js",
-      "sha256": "97f3efe2fce87b21bfaf49092bb9f5adeeae50bc3e1902ebe1b1e17855c0f665"
+      "sha256": "8ec79ca24a08984663238bae6cd4e98eda5a23d1a6545c4b890d6c10da1fc3cf"
     },
     {
       "destination": "office/scene/daylight.js",
-      "sha256": "d4e23fdb7bd0d1cabff52373c51eefe1e183b677e81639e3ca323b5c5b521f17"
-    },
-    {
-      "destination": "office/scene/lighting-layout.js",
-      "sha256": "b4afa47349f58e736d4757f1d62c6c7f1e573bfe246caf59f0afc42899e04d2f"
+      "sha256": "eaccaaca0d8792cdaad326c1a81a7829589a2f7f857b6bb5d6edad8728ccce55"
     },
     {
       "destination": "office/scene/platform-models.js",
@@ -1516,6 +1500,22 @@
     {
       "destination": "office/grok-connection.js",
       "sha256": "58693a058fffea94a5488db9d2f01b0c09f398ada0d36b8996c9cc3f1e7a289d"
+    },
+    {
+      "destination": "office/scene/render-settings.js",
+      "sha256": "e3a774a932bdea63dc9b900678b01838aea931ebfc94ec9894c07ad6f8caf53b"
+    },
+    {
+      "destination": "office/scene/post.js",
+      "sha256": "47dc7d4accf7fcd23998d31d84d2544b9ea55cff4627dbd688ce904c1c691391"
+    },
+    {
+      "destination": "office/scene/studio.js",
+      "sha256": "50f1f72e4e7359c131c156af833c79b00000e98e9a9d8054455aba8ea5ba7b32"
+    },
+    {
+      "destination": "office/scene/sunpatch.js",
+      "sha256": "1b7a5b302afe2134bb2f630dfcf3c90d5d0c0beb997692c60b2fd76cbceeb44b"
     }
   ]
 }

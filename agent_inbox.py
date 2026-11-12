@@ -171,10 +171,7 @@ class Inbox:
             self.bridge.history.secrets = (*self.bridge.history.secrets, token)
         prefix = [sys.executable, str(ROOT/'adapters/inbox.py'), '--credential', str(credential)]
         capability=self.commands.capability(agent_id)
-        binding=self.commands.binding(agent_id) or {}
-        observation=(self.cursor_observation(agent,folder)
-            if agent['provider']=='cursor' and agent.get('driver')=='push' and binding.get('adapter')!='cursor_cloud'
-            else None)
+        observation=None
         reporting=None
         reporting_text=''
         if agent['provider']=='grok_bot':
@@ -219,26 +216,18 @@ class Inbox:
                     **({'reporting':reporting} if reporting is not None else {}),
                     **({'observation':observation} if observation is not None else {})}
         if agent['provider']=='cursor' and agent.get('driver')=='push':
-            text=(f'Virtual Office 入場、公開同步及收訊能力：{agent["name"]}\n\n'
+            text=(f'Virtual Office 入場及收訊能力：{agent["name"]}\n\n'
                 '保留目前 session、模型、權限及專案，只使用自己的有效接入身份。\n'
                 '入場結果以 join.py 的 joined=true 及兩個 accepted=true 為準；capability.persistent=false 不代表入場失敗。'
-                'Cursor 本機一般聊天可同步工作狀態及公開對話，但本版尚未接通原聊天的原生背景喚醒。\n')
-            if observation and observation.get('guide_path'):
-                text+='完成首次回報後，必須接續讀取這份原聊天公開同步指引：\n'+observation['guide_path']+'\n'
-            elif observation:
-                text+='公開同步 state='+observation['state']+'；reason='+str(observation.get('reason'))+'。停止使用失效或不明的觀察憑證。\n'
-            text+=(
-                '依 observation 的狀態完成觀察設定及 activation_marker 驗證，不能因收訊 unsupported 就停下來。'
-                '這份收件箱的 credential.json 只供留言通道使用，不要拿來代替原邀請的上報憑證或安裝觀察 Hook。'
-                '父聊天綁定後，子 Agent 自動沿用公開同步，毋須逐隻設定。\n'
+                'Cursor 本機一般聊天可保存留言，但本版尚未接通原聊天的原生背景喚醒。\n'
                 '不要為本機 Cursor 執行 Codex 自動辨認，也不要嘗試 Hermes、Grok Webhook 或 Cursor Cloud 代替原聊天。'
                 '不啟動等待工具、常駐模型、服務或排程；不要宣稱持續待命。OFFICE 可保存留言，但不表示原聊天已收到或執行。\n'
                 '如果指定憑證不存在、只剩 credential.logged-out 檔案，或伺服器回覆身份已撤銷，停止接駁並回報需要重新入場。'
                 '請擁有人在 OFFICE 產生新邀請，再讀取新接入指引；不要恢復、改名、讀取或重用已登出憑證。\n')
             private_write(guide,text)
             return {'agent_id':agent_id,'credential_path':str(credential),'guide_path':str(guide),
-                'prompt':'請確認目前 Cursor 本機聊天的入場及公開同步；背景收訊未接通不代表入場失敗。讀取：\n'+str(guide),
-                'capability':capability,**({'observation':observation} if observation is not None else {})}
+                'prompt':'請確認目前 Cursor 本機聊天的入場狀態；背景收訊未接通不代表入場失敗。讀取：\n'+str(guide),
+                'capability':capability}
         connect=[sys.executable,str(ROOT/'adapters/connect.py'),'--credential',str(credential)]
         text = (f'Virtual Office 雙向對話：{agent["name"]}\n\n'
             '這是同一份邀請的持續收訊步驟；新入場 Agent 直接接續執行，毋須向人類索取第二段 Prompt，也不要重新入場。\n'

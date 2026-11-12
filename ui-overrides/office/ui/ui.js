@@ -1,5 +1,6 @@
 import {deskLabel} from '../seating.js';
 import {canManageAgent} from '../subagent-view.js';
+import {renderSettings, setRenderSettings, onRenderSettings} from '../scene/render-settings.js';
 /*
  * Bot HQ UI: live cards on top of the full-bleed 3D scene (CONTRACT v2.3; look = the wallpaper's cards, web/face/face.css).
  *   top-left   brand + live clock         top-center  status counters        top-right  DEMO + usage meter
@@ -87,6 +88,7 @@ const ICON = {
   eyeOff: '<svg class="bhq-eye-off" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.6 8s2.4-4.4 6.4-4.4S14.4 8 14.4 8 12 12.4 8 12.4 1.6 8 1.6 8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" opacity=".55"/><path d="M3 13L13 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   check: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M3.5 8.6l3 3 6-6.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   share: '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M10 12.2V2.9M6.7 6.1L10 2.8l3.3 3.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.2 8.7H6A1.8 1.8 0 0 0 4.2 10.5v5A1.8 1.8 0 0 0 6 17.3h8a1.8 1.8 0 0 0 1.8-1.8v-5A1.8 1.8 0 0 0 14 8.7h-1.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  gear: '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 2.4v1.7M10 15.9v1.7M2.4 10h1.7M15.9 10h1.7M4.6 4.6l1.2 1.2M14.2 14.2l1.2 1.2M15.4 4.6l-1.2 1.2M5.8 14.2l-1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
 };
 
 const reducedMotion = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
@@ -480,6 +482,78 @@ export function initUI(handlers) {
   }, 15000);
 }
 
+/* ------------------------------------------------------------------ build: picture settings */
+
+const GFX_CSS = `
+.bhq-gfx-btn { flex: none; width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; color: var(--hi); cursor: pointer; transition: transform .3s var(--bhq-spring); }
+.bhq-gfx-btn:active { transform: scale(.9); }
+.bhq-phone .bhq-gfx-btn { width: 42px; height: 42px; border-radius: 21px; }
+.bhq-gfx { position: fixed; z-index: 40; width: min(280px, calc(100vw - 16px)); max-height: min(70vh, 520px); overflow: auto; padding: 12px; border-radius: 18px; display: flex; flex-direction: column; gap: 10px; }
+.bhq-gfx[hidden] { display: none !important; }
+.bhq-gfx-row { display: flex; flex-direction: column; gap: 6px; }
+.bhq-gfx-name { color: var(--mid); font: 800 11px/1.2 var(--bhq-round); }
+.bhq-gfx-opts { display: flex; gap: 4px; }
+.bhq-gfx-opt { flex: 1; height: 32px; border: 0; border-radius: 10px; cursor: pointer; background: rgba(255,255,255,.08); color: var(--hi); font: 800 12.5px/1 var(--bhq-round); }
+.bhq-gfx-opt[aria-pressed="true"] { background: #fff; color: #1c1c1f; }
+.bhq-gfx-opt:focus-visible { outline: 2px solid #7DB7FF; outline-offset: 1px; }
+`;
+
+function mountGraphics(parent) {
+  if (!document.getElementById('bhq-gfx-css')) {
+    const style = document.createElement('style');
+    style.id = 'bhq-gfx-css';
+    style.textContent = GFX_CSS;
+    document.head.append(style);
+  }
+  const btn = h('button', { class: 'bhq-gfx-btn bhq-surface', type: 'button', 'aria-label': '畫面設定', title: '畫面設定', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, svg(ICON.gear));
+  const pop = h('div', { class: 'bhq-gfx bhq-surface', role: 'dialog', 'aria-label': '畫面設定', hidden: true });
+  const rows = [
+    choiceRow('像素', [['50%', 0.5], ['75%', 0.75], ['100%', 1]], 'scale'),
+    choiceRow('陽光陰影', [['關', 0], ['1024', 1024], ['2048', 2048]], 'shadow'),
+    choiceRow('移軸模糊', [['關', false], ['開', true]], 'tilt'),
+    choiceRow('大樓軟影', [['關', false], ['開', true]], 'aura'),
+    choiceRow('檯燈', [['關', false], ['開', true]], 'lamps'),
+    choiceRow('抗鋸齒', [['關', 0], ['2×', 2], ['4×', 4]], 'aa'),
+  ];
+  pop.append(...rows.map((row) => row.el));
+  parent.append(btn);
+  document.body.append(pop);
+  const place = () => {
+    const r = btn.getBoundingClientRect();
+    pop.style.top = `${Math.round(r.bottom + 8)}px`;
+    pop.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
+  };
+  const show = (on) => {
+    if (on) place();
+    pop.hidden = !on;
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  };
+  btn.addEventListener('click', () => show(pop.hidden));
+  document.addEventListener('pointerdown', (e) => { if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) show(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) show(false); });
+  addEventListener('resize', () => { if (!pop.hidden) place(); });
+  const paint = (q) => { for (const row of rows) row.paint(q); };
+  paint(renderSettings());
+  onRenderSettings(paint);
+}
+
+function choiceRow(label, options, key) {
+  const name = h('span', { class: 'bhq-gfx-name', text: label });
+  const group = h('div', { class: 'bhq-gfx-opts', role: 'group', 'aria-label': label });
+  const buttons = options.map(([text, value]) => {
+    const b = h('button', { class: 'bhq-gfx-opt', type: 'button', text });
+    b.addEventListener('click', () => setRenderSettings({ [key]: value }));
+    return { b, value };
+  });
+  group.append(...buttons.map((item) => item.b));
+  return {
+    el: h('div', { class: 'bhq-gfx-row' }, name, group),
+    paint(q) {
+      for (const item of buttons) item.b.setAttribute('aria-pressed', item.value === q[key] ? 'true' : 'false');
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ build: top bar */
 
 function buildTopbar(root) {
@@ -523,6 +597,7 @@ function buildTopbar(root) {
     loadShare().then((m) => m.toggleShare({ anchor: share, state: U.last.state }), (err) => console.warn('[ui] share', err));
   });
   const right = h('div', { class: 'bhq-right' }, demo, usage);
+  mountGraphics(right);
 
   root.append(brand, summary, right);
   U.top = { root, clock, connection, connectionLabel, chips, summary, usage, usageLabel, meter, fill, pct, reset, demo };
@@ -579,7 +654,9 @@ function buildPanel(root) {
       h('div', { class: 'bhq-tcounts' }, rowWait, rowErr)));
   const list = watchFade(h('div', { class: 'bhq-members', role: 'list' }));
   const teamEmpty = h('p', { class: 'bhq-note', text: '目前沒有成員。只有你指定入駐的 Agent 才會顯示。', hidden: true });
-  const tcard = h('div', { class: 'bhq-tcard bhq-surface bhq-glow' }, list, teamEmpty);
+  const fresh = h('button', { class: 'office-new-chat', type: 'button', text: '＋ 新對話' });
+  fresh.addEventListener('click', () => window.dispatchEvent(new CustomEvent('office:new-conversation')));
+  const tcard = h('div', { class: 'bhq-tcard bhq-surface bhq-glow' }, fresh, list, teamEmpty);
   head.append(teamHint);
   const team = h('section', { class: 'bhq-team', 'aria-label': 'Floor team' }, head, tcard);
 
@@ -1408,6 +1485,7 @@ function renderTeam(state, floor, o) {
     setText(c.seen, seenAt == null ? '–' : relShort(seenAt));
     setAttr(c.seen, 'title', seenAt == null ? 'No status line yet' : 'Last status line ' + relAgo(seenAt) + ' (' + hhmm(seenAt) + ')');
     setAttr(c.btn, 'data-s', s);
+    setCls(c.btn, 'is-unread', !!bot.unread);
     setAttr(c.btn, 'aria-label', (bot.name || id) + ', ' + statusLabel(s) + ', ' + seenText(bot));
     setAttr(c.btn, 'title', (bot.name || id) + ': ' + statusLabel(s) + (bot.step ? '. ' + bot.step : '') + ' · ' + seenText(bot));
     return c.btn;

@@ -172,7 +172,7 @@ class ChildEvents:
                         'observer_id':ident,'agent_id':root['id'],'provider':root['provider'],
                         'native_session_id':native,'generation':state['generation'],'token':token,
                         'source_kind':kind,'evidence':evidence}
-            fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+            fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os, 'O_NOFOLLOW', 0),0o600)
             with os.fdopen(fd,'w') as out:json.dump(credential,out,ensure_ascii=False,indent=2)
             with self.db:
                 self.db.execute('UPDATE child_observers SET active=0 WHERE root_id=?',(root['id'],))
@@ -188,7 +188,7 @@ class ChildEvents:
 
     @staticmethod
     def _write_private(path,data):
-        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os, 'O_NOFOLLOW', 0),0o600)
         with os.fdopen(fd,'w') as out:
             json.dump(data,out,ensure_ascii=False,indent=2)
             out.flush();os.fsync(out.fileno())
@@ -196,7 +196,7 @@ class ChildEvents:
     def _read_private(self,path):
         path=Path(path)
         if path.parent.resolve()!=self.directory.resolve():raise ValueError('invalid_observer_path')
-        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+        fd=os.open(path,os.O_RDONLY|getattr(os, 'O_NOFOLLOW', 0))
         with os.fdopen(fd) as source:
             info=os.fstat(source.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size>16384 or info.st_mode&0o077:

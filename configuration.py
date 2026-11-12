@@ -70,6 +70,12 @@ def load_config(path=DEFAULT_CONFIG):
     disabled=data.get('disabled_command_agents',[])
     if not isinstance(disabled,list) or any(not isinstance(ident,str) or ident not in ids for ident in disabled) or len(set(disabled))!=len(disabled):
         raise ValueError('Disabled command targets must be unique selected agents')
+    archived=data.get('archived_agent_ids',[])
+    if not isinstance(archived,list) or any(not isinstance(ident,str) or ident not in ids for ident in archived) or len(set(archived))!=len(archived):
+        raise ValueError('Archived agents must be unique selected agents')
+    away=data.get('cursor_cloud_away_ids',[])
+    if not isinstance(away,list) or any(not isinstance(ident,str) or ident not in ids for ident in away) or len(set(away))!=len(away):
+        raise ValueError('Cursor cloud absence must list unique selected agents')
     bindings=data.get('command_bindings',{})
     if not isinstance(bindings,dict):raise ValueError('Invalid command bindings')
     selected={a['id']:a for a in agents}
@@ -77,14 +83,14 @@ def load_config(path=DEFAULT_CONFIG):
         agent=selected.get(ident)
         if not agent or not isinstance(binding,dict) or set(binding)!={'adapter','session_id'}:
             raise ValueError('Command target must be an explicitly selected agent')
-        expected = {'codex_app':'codex','hermes_acp':'hermes','cursor_cloud':'cursor','grok_webhook':'push'}.get(binding['adapter'])
-        pattern = r'bc-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}' if binding['adapter']=='cursor_cloud' else r'[A-Za-z0-9_.-]{1,160}' if binding['adapter']=='grok_webhook' else r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
+        expected = {'codex_app':'codex','hermes_acp':'hermes','cursor_cloud':'cursor','cursor_local':'cursor','grok_webhook':'push'}.get(binding['adapter'])
+        pattern = r'agent-[A-Za-z0-9_.-]{1,140}' if binding['adapter']=='cursor_local' else r'bc-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}' if binding['adapter']=='cursor_cloud' else r'[A-Za-z0-9_.-]{1,160}' if binding['adapter']=='grok_webhook' else r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}'
         invited_codex=binding['adapter']=='codex_app' and agent['provider']=='codex' and agent['driver']=='push'
         if not expected or (not invited_codex and (agent['driver']!=expected or binding['session_id']!=agent['source_id'])) or not isinstance(binding['session_id'],str) or not re.fullmatch(pattern,binding['session_id']) or (binding['adapter']=='grok_webhook' and agent['provider']!='grok_bot'):
             raise ValueError('Command target must match the selected native session')
     codex_targets(data)
     adapters=data.get('command_adapters',{})
-    if not isinstance(adapters,dict) or set(adapters)-{'codex_app','hermes_acp','cursor_cloud','grok_webhook'}:raise ValueError('Unknown command adapter')
+    if not isinstance(adapters,dict) or set(adapters)-{'codex_app','hermes_acp','cursor_cloud','cursor_local','grok_webhook'}:raise ValueError('Unknown command adapter')
     codex=adapters.get('codex_app',{})
     if not isinstance(codex,dict) or set(codex)-{'binary'}:raise ValueError('Invalid command adapter settings')
     if 'binary' in codex and (not isinstance(codex['binary'],str) or not Path(codex['binary']).is_absolute()):
@@ -119,6 +125,21 @@ def load_config(path=DEFAULT_CONFIG):
         for binding in bindings.values():
             if binding['adapter']==adapter and binding['session_id'] not in settings.get('sessions',{}):
                 raise ValueError('Platform command binding needs connection settings')
+    local=adapters.get('cursor_local',{})
+    if not isinstance(local,dict) or set(local)-{'sessions'} or not isinstance(local.get('sessions',{}),dict):
+        raise ValueError('Invalid platform settings')
+    for sid,item in local.get('sessions',{}).items():
+        if 'cursor:'+sid not in selected or not isinstance(item,dict) or set(item)!={'credential_file','cwd','model'}:
+            raise ValueError('Platform connection requires a selected agent and a local credential file')
+        if not isinstance(item['credential_file'],str) or not Path(item['credential_file']).is_absolute():
+            raise ValueError('Platform connection requires a selected agent and a local credential file')
+        if not isinstance(item['cwd'],str) or not Path(item['cwd']).is_absolute():
+            raise ValueError('Cursor local workspace must be an absolute path')
+        if not isinstance(item.get('model'),str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,64}',item['model']):
+            raise ValueError('Invalid Cursor local model')
+    for binding in bindings.values():
+        if binding['adapter']=='cursor_local' and binding['session_id'] not in local.get('sessions',{}):
+            raise ValueError('Platform command binding needs connection settings')
     data.setdefault('codex_db',str(Path(os.environ.get('CODEX_HOME',str(Path.home()/'.codex')))/'state_5.sqlite'))
     cursor_public_db = data.get('cursor_public_db')
     if cursor_public_db is not None and (

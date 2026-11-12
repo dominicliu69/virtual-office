@@ -36,9 +36,17 @@ class Connection:
 
 class CursorFixture:
     def __init__(self):
-        self.calls=[];self.runs={};self.posts=[];self.interrupted=False;self.wrong=False
+        self.calls=[];self.runs={};self.posts=[];self.cancelled=[];self.interrupted=False;self.wrong=False
     def json(self, method, url, headers, data=None):
         self.calls.append((method,url))
+        if method=='POST' and url.endswith('/cancel'):
+            native=url.split('/')[-2]
+            self.cancelled.append(native)
+            if getattr(self,'cancel_busy',False):raise RemoteError('platform_agent_busy')
+            if not getattr(self,'cancel_stuck',False) and native in self.runs:
+                self.runs[native]['status']='CANCELLED'
+                self.runs[native].pop('result',None)
+            return {'id':native}
         if method=='POST':
             self.posts.append(data)
             native='run-'+str(uuid.uuid4());self.runs[native]={'id':native,'agentId':SID,'status':'FINISHED','result':'round %s completed password=hidden-value'%len(self.posts)}
@@ -104,6 +112,8 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(len(self.transport.posts),2)
         self.assertTrue(all('/'+SID+'/runs' in url for method,url in self.transport.calls if method=='POST'))
         self.assertEqual(set(self.transport.posts[0]),{'prompt'},'No provider, model, tool or permission overrides')
+        self.assertEqual([item['prompt']['text'] for item in self.transport.posts],
+            ['Remember fixture 917','Continue with previous fixture value'])
         self.assertTrue(self.bridge.commands.create(first)['duplicate'])
         self.bridge.commands.tick();self.assertEqual(len(self.transport.posts),2)
         rows=self.bridge.history.messages({AGENT},AGENT)
@@ -213,6 +223,37 @@ class PlatformTests(unittest.TestCase):
         self.submit(text='Waiting follower')
         for _ in range(4):self.bridge.commands.tick()
         self.assertEqual(calls,['POST'])
+    def test_cloud_lost_result_stays_blocking_until_a_queued_follow_up_is_released(self):
+        self.connect();self.transport.interrupted=True
+        first=self.submit(text='Lost cloud round')
+        self.wait(first,{'delivery_unknown'})
+        self.assertEqual(self.bridge.commands.interrupt_active(AGENT),{'released':False})
+        self.assertEqual(self.transport.cancelled,[])
+        follower=self.submit(text='Send this next')
+        self.bridge.commands.tick();self.assertEqual(len(self.transport.posts),1)
+        self.transport.cancel_stuck=True
+        self.assertEqual(self.bridge.commands.interrupt_active(AGENT),{'released':False})
+        self.bridge.commands.tick();self.assertEqual(len(self.transport.posts),1)
+        self.assertEqual(self.bridge.commands.list(AGENT)['commands'][-1]['state'],'delivery_unknown')
+        self.transport.cancel_stuck=False;self.transport.interrupted=False
+        self.assertTrue(self.bridge.commands.interrupt_active(AGENT)['released'])
+        self.wait(follower,{'completed'})
+        self.assertEqual(len(self.transport.posts),2)
+        self.assertNotIn('Lost cloud round',json.dumps(self.transport.posts[1]))
+        self.assertIn('Send this next',json.dumps(self.transport.posts[1]))
+        lost=next(row for row in self.bridge.commands.list(AGENT)['commands'] if row['id']==first['request_id'])
+        self.assertEqual(lost['state'],'cancelled')
+        self.assertEqual(lost['detail_code'],'cursor_cloud_unconfirmed_released')
+    def test_cloud_already_finished_lost_result_can_still_release_the_follow_up(self):
+        self.connect();self.transport.interrupted=True
+        first=self.submit(text='Already finished round');follower=self.submit(text='Next after finish')
+        self.wait(first,{'delivery_unknown'})
+        self.transport.interrupted=False;self.transport.cancel_busy=True
+        self.bridge.commands.tick();self.assertEqual(len(self.transport.posts),1)
+        self.assertTrue(self.bridge.commands.interrupt_active(AGENT)['released'])
+        self.wait(follower,{'completed'})
+        self.assertEqual(len(self.transport.posts),2)
+        self.assertNotIn('Already finished round',json.dumps(self.transport.posts[1]))
     def test_owner_only_connection_api_and_no_secret_reflection(self):
         server=ThreadingHTTPServer(('127.0.0.1',0),proxy_handler(self.bridge));self.bridge.config['port']=server.server_address[1]
         worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()

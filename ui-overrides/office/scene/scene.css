@@ -127,6 +127,10 @@
 .office-speech:not(.expanded) .speech-peek{display:flex;align-items:center;gap:6px;min-height:29px;padding:6px 9px;border-radius:999px}
 .office-speech:not(.expanded) .speech-name{flex:1;min-width:0;font-size:10px}
 .office-speech:not(.expanded) .speech-meta,.office-speech:not(.expanded) .speech-preview{display:none}
+.office-speech.is-working:not(.expanded){width:220px}
+.office-speech.is-working:not(.expanded) .speech-peek{display:grid;grid-template-columns:1fr auto;border-radius:15px}
+.office-speech.is-working:not(.expanded) .speech-preview{display:-webkit-box}
+.office-speech.is-unread .speech-name::after{content:"";display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:#3d8bfd;box-shadow:0 0 6px #7db7ff;vertical-align:1px}
 .office-speech.is-subagent .speech-name::before{content:'↳ ';color:#648096}
 .speech-state{display:inline-block;flex:none;width:6px;height:6px;border-radius:50%;background:#8c9692}
 .office-speech[data-status=working] .speech-state{background:#34a86a}

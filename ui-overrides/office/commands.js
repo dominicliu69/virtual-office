@@ -1,4 +1,5 @@
 import { officeGet,officePost } from './office-api.js';
+import { rememberSeq } from './office-read.js';
 import {grokConnectionView} from './grok-connection.js';
 
 export const commandLabel=(state)=>({pending:'等待送出',sending:'正在送往原聊天',queued:'已排隊 · 等候原聊天開始',waiting_user:'等待你批准操作',
@@ -11,6 +12,7 @@ export function queueHint(command,now=Date.now(),mode='background_queue') {
 }
 export function localReceiverUnavailable(capability){return capability?.mode==='agent_inbox'&&capability.reason==='cursor_local_background_unavailable';}
 export function receivingHint(capability,received=false,agent=''){
+  if(capability?.mode==='cursor_local')return '本機 Cursor 已接通 · 直接傳送';
   if(localReceiverUnavailable(capability))return '只保存留言 · 無法自動喚醒原聊天';
   if(capability?.mode==='grok_webhook'||agent.startsWith('grok_bot:'))return grokConnectionView(capability).title;
   if(capability?.mode==='agent_inbox')return received?'上一則已被收取 · 新訊息會排隊':capability.receiver_online?'臨時收訊中 · 持續接駁待完成':'持續接駁待完成 · 可先留言';
@@ -62,8 +64,13 @@ export class CommandComposer {
     this.form=this.element.querySelector('form');this.input=this.element.querySelector('textarea');this.button=this.element.querySelector('button');this.status=this.element.querySelector('.command-status');
     this.approvalBox=document.createElement('div');this.approvalBox.className='command-approvals';this.element.append(this.approvalBox);
     this.syncStatus=this.element.querySelector('.command-public-sync');
-    this.form.addEventListener('submit',event=>{event.preventDefault();this.send();});
-    this.input.addEventListener('keydown',event=>{event.stopPropagation();if(!event.isComposing && event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();this.send();}});
+    this.form.addEventListener('submit',event=>{event.preventDefault();if(!this.input.value.trim())this.interrupt();else this.send();});
+    this.input.placeholder='輸入訊息，Enter 傳送';
+    this.input.addEventListener('keydown',event=>{
+      if(event.key==='Escape')return;
+      event.stopPropagation();
+      if(!event.isComposing && event.key==='Enter' && !event.shiftKey){event.preventDefault();if(!this.input.value.trim())this.interrupt();else this.send();}
+    });
     this.input.addEventListener('keyup',event=>event.stopPropagation());
     this.input.addEventListener('input',()=>this.updateButton());
   }
@@ -77,19 +84,19 @@ export class CommandComposer {
     if(this.pendingBox){this.pendingBox.replaceChildren();this.pendingBox.hidden=true;}
   }
   resetIdentity(){
-    this.invalidateAsync();this.latest=null;this.attempt=null;this.uncertain=false;
+    this.invalidateAsync();this.latest=null;this.attempt=null;this.uncertain=false;this.commands=[];
     this.input.value='';this.status.textContent='';this.status.title='';delete this.status.dataset.state;
   }
   bind(agent='',capability) {
     if(this.agent!==agent)this.resetIdentity();
     else if(bindingScope(this.capability)!==bindingScope(capability))this.invalidateAsync();
     this.agent=agent;this.capability=capability;
-    const inbox=capability?.mode==='agent_inbox',grok=capability?.mode==='grok_webhook'||agent.startsWith('grok_bot:');
-    const targetLabel=inbox?'同 Agent 對話':capability?.mode==='grok_webhook'?'傳送指示給 Bot':'傳送指示到原聊天';
+    const inbox=capability?.mode==='agent_inbox',grok=capability?.mode==='grok_webhook'||agent.startsWith('grok_bot:'),localSdk=capability?.mode==='cursor_local';
+    const targetLabel=localSdk?'傳送指示到本機 Cursor':inbox?'同 Agent 對話':capability?.mode==='grok_webhook'?'傳送指示給 Bot':'傳送指示到原聊天';
     this.input.setAttribute('aria-label',targetLabel);this.form.querySelector('label').firstChild.textContent=targetLabel;
     this.form.hidden=!capability?.can_send;
     if(!capability?.can_send && !this.latest)this.status.textContent=capability?.reason==='dispatch_disabled'?'這位 Agent 的指令入口已停用。':capability?.same_session?'原聊天指令入口暫時無法使用。':'尚未接通指令入口';
-    else if(!this.latest && !this.uncertain)this.status.textContent=localReceiverUnavailable(capability)?'只能保存留言，不能自動喚醒這個 Cursor 原聊天。':grok?grokConnectionView(capability).message:inbox?'訊息會保存在這位 Agent 的私有收件箱。':'指示會送到呢個 Agent 原本嘅聊天。';
+    else if(!this.latest && !this.uncertain)this.status.textContent=localReceiverUnavailable(capability)?'只能保存留言，不能自動喚醒這個 Cursor 原聊天。':localSdk?'指示會送到這條本機 Cursor session。':grok?grokConnectionView(capability).message:inbox?'訊息會保存在這位 Agent 的私有收件箱。':'指示會送到呢個 Agent 原本嘅聊天。';
     const received=inbox&&['queued','running','waiting_user'].includes(this.latest?.state);
     this.form.querySelector('.command-actions span').textContent=receivingHint(capability,received,agent);
     if(!this.connect){this.connect=document.createElement('button');this.connect.type='button';this.connect.className='office-workspace-edit';this.connect.textContent='啟用持續收訊';this.connect.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('office-inbox-setup',{detail:{agent_id:this.agent}})));this.element.append(this.connect);}
@@ -97,11 +104,47 @@ export class CommandComposer {
     this.connect.hidden=setup.hidden;
     this.connect.textContent=setup.label;
     this.syncStatus.textContent=publicSyncHint(capability);this.syncStatus.title=this.syncStatus.textContent;
+    if(this.direct===false){
+      this.form.hidden=true;
+      if(!this.latest && !this.uncertain)this.status.textContent='子 Agent 由主 Agent 指派，不能在這裡直接傳送。';
+    }
     this.updateButton();
   }
-  updateButton(){this.button.disabled=this.busy||!this.capability?.can_send||!this.input.value.trim();this.button.textContent=this.busy?'傳送中…':this.capability?.mode==='agent_inbox'&&!this.capability.receiver_online?'留言':'傳送';}
+  remember(command){
+    if(!command)return;
+    this.commands=[command, ...(this.commands||[]).filter(row=>row.id!==command.id)];
+  }
+  busyLocal(){return this.capability?.mode==='cursor_local' && (this.commands||[]).some(row=>['sending','queued','running','waiting_user'].includes(row.state));}
+  queuedFollowUp(){return this.capability?.mode==='cursor_local' && (this.commands||[]).some(row=>row.state==='pending');}
+  cloudFollowUp(){
+    const rows=this.commands||[];
+    return this.capability?.mode==='cursor_cloud' && rows.some(row=>row.state==='delivery_unknown') && rows.some(row=>row.state==='pending') && !rows.some(row=>['sending','queued','running','waiting_user'].includes(row.state));
+  }
+  updateButton(){
+    const stopOnly=this.busyLocal()&&this.queuedFollowUp()&&!this.input.value.trim();
+    const releaseOnly=this.cloudFollowUp()&&!this.input.value.trim();
+    this.button.disabled=this.busy||!this.capability?.can_send||(!stopOnly&&!releaseOnly&&!this.input.value.trim());
+    this.button.textContent=this.busy?'傳送中…':stopOnly?'打斷並送出':releaseOnly?'送出下一句':this.capability?.mode==='agent_inbox'&&!this.capability.receiver_online?'留言':'傳送';
+    const hint=this.form.querySelector('.command-actions span');
+    if(this.capability?.mode==='cursor_local')hint.textContent=stopOnly?'已排隊 · 再按 Enter 先打斷並送出':'本機 Cursor 已接通 · 直接傳送';
+    else if(releaseOnly)hint.textContent='上一句結果未確認 · 再按 Enter 先取消並送出下一句';
+  }
+  async interrupt(){
+    const release=this.cloudFollowUp();
+    if((!this.queuedFollowUp()&&!release)||this.busy)return;
+    const scope=this.scope();
+    try{
+      const data=await officePost('/api/office/commands/interrupt',decodeURIComponent(location.hash.slice(1)),{agent_id:this.agent});
+      if(!this.current(scope))return;
+      if(data.released)this.status.textContent='已取消未確認的回合，正在送出下一句。';
+      else if(data.interrupted)this.status.textContent='已中止上一則，正在送出排隊訊息。';
+      else if(release)this.status.textContent='未確認的回合仍在進行，下一句尚未送出。';
+      this.refresh();
+    }catch(error){if(this.current(scope))this.status.textContent=errors[error.message]||(release?'暫時未能取消未確認的回合，下一句仍未送出。':'暫時無法中止。');}
+  }
   show(command) {
     this.latest=command;
+    this.remember(command);
     const hint=queueHint(command,Date.now(),this.capability?.mode);
     const label=this.capability?.mode==='agent_inbox'?({pending:'已儲存 · 等待 Agent 收取',queued:'已交給接收工具 · 等待 Agent 確認',running:'Agent 已確認 · 處理中',completed:'Agent 已交付回覆',cancelled:'已取消'}[command.state]||commandLabel(command.state)):this.capability?.mode==='grok_webhook'?({queued:'Webhook 已接收 · 等待 Bot 回報',running:'Bot 已回報開始 · 執行中',completed:'Bot 已回報完成'}[command.state]||commandLabel(command.state)):commandLabel(command.state);
     const visibleLabel=localReceiverUnavailable(this.capability)&&command.state==='pending'?'已保存留言 · 原聊天未收到':label;
@@ -172,7 +215,7 @@ export class CommandComposer {
       if(!this.current(scope))return;
       this.uncertain=submitted&&(!error.status||error.status>=500);
       this.status.textContent=this.uncertain?'未確認伺服器有冇收到；正在核對。再次傳送同一句會沿用同一指令編號。':errors[error.message]||'暫時無法傳送指示。';
-    }finally{this.endMutation(scope);if(this.current(scope)){this.busy=false;this.updateButton();}}
+    }finally{this.endMutation(scope);if(this.current(scope)){this.busy=false;this.updateButton();this.refresh();}}
   }
   async refresh() {
     if(!this.agent||!(this.capability?.connected||this.capability?.same_session)||this.refreshing||this.busy||this.mutationDepth>0)return;
@@ -181,12 +224,191 @@ export class CommandComposer {
       const data=await officeGet('/api/office/commands?'+new URLSearchParams({agent}),decodeURIComponent(location.hash.slice(1)));
       if(!currentRead())return;
       this.bind(agent,data.capability);
+      this.commands=data.commands||[];
       this.renderApprovals(data.approvals || []);
       this.renderPending(data.commands);
       const command=data.commands.find(row=>row.id===this.attempt?.id)||data.commands[0];
       if(command && (!this.uncertain||command.id===this.attempt?.id))this.confirmed(command);
+      else this.updateButton();
     }catch{if(currentRead()&&this.latest)this.status.textContent='連線中斷 · 上次指令狀態：'+commandLabel(this.latest.state);}
     finally{if(currentRead())this.refreshing=false;}
   }
   dispose(){this.resetIdentity();this.agent=null;this.capability=null;this.form.hidden=true;this.syncStatus.textContent='';}
+}
+
+/** One composer for the selected agent. The head label stays a status, not the keyboard. */
+export function mountComposerDock(parent=document.body) {
+  const dock=document.createElement('section');
+  dock.className='office-composer-dock';
+  dock.hidden=true;
+  dock.setAttribute('aria-label','對話');
+  const head=document.createElement('div');
+  head.className='office-composer-head';
+  const name=document.createElement('p');
+  name.className='office-composer-name';
+  const editor=document.createElement('input');
+  editor.className='office-composer-editor';
+  editor.hidden=true;
+  editor.maxLength=80;
+  editor.setAttribute('aria-label','辦公室顯示名稱');
+  const rename=document.createElement('button');
+  rename.type='button';
+  rename.className='office-composer-rename';
+  rename.textContent='改名';
+  head.append(name,editor,rename);
+  const log=document.createElement('div');
+  log.className='office-composer-log';
+  log.setAttribute('role','log');
+  const composer=new CommandComposer();
+  dock.append(head,log,composer.element);
+  parent.append(dock);
+  const frameKey='office-composer-frame';
+  const limits=()=>({minWidth:320,minLog:72,maxLog:Math.min(520,window.innerHeight*0.6)});
+  const clampFrame=(data)=>{
+    const bound=limits();
+    const width=Math.min(Math.max(bound.minWidth,data.width),Math.max(bound.minWidth,window.innerWidth-32));
+    const left=Math.min(Math.max(16,data.left),Math.max(16,window.innerWidth-16-width));
+    const logHeight=Math.min(Math.max(bound.minLog,data.log),bound.maxLog);
+    return {width,left,log:logHeight};
+  };
+  const defaultFrame=()=>clampFrame({width:Math.min(480,window.innerWidth-32),left:(window.innerWidth-Math.min(480,window.innerWidth-32))/2,log:168});
+  let frame=defaultFrame();
+  try{
+    const saved=JSON.parse(localStorage.getItem(frameKey)||'null');
+    if(saved&&[saved.width,saved.left,saved.log].every(Number.isFinite))frame=clampFrame(saved);
+  }catch{/* keep the narrow default */}
+  const applyFrame=()=>{
+    frame=clampFrame(frame);
+    dock.style.left=frame.left+'px';
+    dock.style.width=frame.width+'px';
+    dock.style.right='auto';
+    log.style.height=frame.log+'px';
+  };
+  const saveFrame=()=>{try{localStorage.setItem(frameKey,JSON.stringify(frame));}catch{/* a private browser can refuse storage */}};
+  applyFrame();
+  addEventListener('resize',applyFrame);
+  for(const edge of ['left','right','top']){
+    const handle=document.createElement('div');
+    handle.className='office-composer-resize is-'+edge;
+    handle.setAttribute('role','separator');
+    handle.setAttribute('aria-orientation',edge==='top'?'horizontal':'vertical');
+    handle.title=edge==='top'?'拉高對話紀錄':'拉闊或收窄';
+    handle.addEventListener('pointerdown',event=>{
+      if(event.button!==0)return;
+      event.preventDefault();
+      event.stopPropagation();
+      const startX=event.clientX,startY=event.clientY,start={...frame};
+      const move=pointer=>{
+        const dx=pointer.clientX-startX,dy=pointer.clientY-startY;
+        if(edge==='left'){
+          const right=start.left+start.width;
+          const width=Math.min(Math.max(320,start.width-dx),Math.max(320,right-16));
+          frame={width,left:right-width,log:start.log};
+        }else if(edge==='right'){
+          frame={width:Math.min(Math.max(320,start.width+dx),Math.max(320,window.innerWidth-16-start.left)),left:start.left,log:start.log};
+        }else frame={width:start.width,left:start.left,log:start.log-dy};
+        applyFrame();
+      };
+      const finish=()=>{
+        handle.removeEventListener('pointermove',move);
+        handle.removeEventListener('pointerup',finish);
+        handle.removeEventListener('pointercancel',finish);
+        saveFrame();
+      };
+      handle.addEventListener('pointermove',move);
+      handle.addEventListener('pointerup',finish);
+      handle.addEventListener('pointercancel',finish);
+      handle.setPointerCapture(event.pointerId);
+    });
+    dock.append(handle);
+  }
+  let agent='',cursor=0,rows=[],timer=null,signature='';
+  const role=row=>row.role==='user'?'你':row.phase==='final'?'回覆':'進度';
+  const paint=()=>{
+    const next=JSON.stringify(rows.map(row=>[row.seq,row.text]));
+    if(next===signature)return;
+    signature=next;
+    const near=log.scrollHeight-log.scrollTop-log.clientHeight<48;
+    log.replaceChildren();
+    for(const row of rows){
+      const article=document.createElement('article');
+      article.className='office-composer-message';
+      article.dataset.role=row.role;
+      const who=document.createElement('small');
+      who.textContent=role(row);
+      const body=document.createElement('p');
+      body.textContent=row.text;
+      article.append(who,body);
+      log.append(article);
+    }
+    if(!rows.length){
+      const empty=document.createElement('p');
+      empty.className='office-composer-empty';
+      empty.textContent='尚未有公開對話。';
+      log.append(empty);
+    }
+    if(near)log.scrollTop=log.scrollHeight;
+    const latest=rows.filter(row=>row.role==='assistant').at(-1);
+    if(latest)rememberSeq(agent,latest.seq);
+  };
+  const refresh=async()=>{
+    if(!agent||dock.hidden)return;
+    const current=agent;
+    try{
+      const key=decodeURIComponent(location.hash.slice(1));
+      const query=new URLSearchParams({agent:current});
+      if(cursor)query.set('after',String(cursor));
+      const data=await officeGet('/api/office/messages?'+query,key);
+      if(current!==agent)return;
+      cursor=Math.max(cursor,data.cursor||0);
+      const seen=new Map(rows.map(row=>[row.event_id||row.seq,row]));
+      for(const row of data.messages||[]){
+        const id=row.event_id||row.seq;
+        const previous=seen.get(id);
+        if(!previous||previous.seq<=row.seq)seen.set(id,row);
+      }
+      rows=[...seen.values()].sort((a,b)=>a.seq-b.seq);
+      paint();
+    }catch{/* the composer status already reports a lost connection */}
+  };
+  const closeEditor=()=>{editor.hidden=true;name.hidden=false;};
+  rename.addEventListener('click',()=>{
+    if(!agent||rename.hidden)return;
+    editor.value=name.textContent||'';
+    name.hidden=true;editor.hidden=false;
+    editor.focus();editor.select();
+  });
+  editor.addEventListener('keydown',async(event)=>{
+    event.stopPropagation();
+    if(event.key==='Escape'){event.preventDefault();closeEditor();return;}
+    if(event.key!=='Enter'||event.isComposing)return;
+    event.preventDefault();
+    const trimmed=editor.value.trim();
+    closeEditor();
+    if(!trimmed||trimmed===name.textContent)return;
+    try{
+      const saved=await officePost('/api/office/agents/rename',decodeURIComponent(location.hash.slice(1)),{agent_id:agent,name:trimmed});
+      name.textContent=saved.name||trimmed;
+    }catch(error){
+      composer.status.textContent=error.message==='name_in_use'?'這個名稱已經有人用。':'暫時未能改名。';
+    }
+  });
+  return {
+    sync(bot, focus=false) {
+      if(!bot?.agent_id){dock.hidden=true;composer.input.blur();closeEditor();clearInterval(timer);timer=null;return;}
+      const changed=agent!==bot.agent_id;
+      agent=bot.agent_id;
+      if(changed){cursor=0;rows=[];signature='';log.replaceChildren();closeEditor();}
+      dock.hidden=false;
+      if(editor.hidden)name.textContent=bot.name||'';
+      const mode=bot.command_capability?.mode;
+      rename.hidden=bot.is_subagent||(mode!=='cursor_local'&&mode!=='cursor_cloud');
+      composer.direct=!bot.is_subagent;
+      composer.bind(bot.agent_id,bot.command_capability);
+      if(focus && !composer.form.hidden && editor.hidden)requestAnimationFrame(()=>composer.input.focus({preventScroll:true}));
+      composer.refresh();
+      refresh();
+      timer ||= setInterval(refresh,2000);
+    },
+  };
 }

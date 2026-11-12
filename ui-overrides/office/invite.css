@@ -1,5 +1,12 @@
 .office-invite-launch{position:fixed;right:86px;top:24px;z-index:45;padding:11px 17px;border:1px solid #d7dfd9;border-radius:22px;background:#fffefa;color:#20372b;font:650 13px system-ui;box-shadow:0 3px 12px #17251c12;cursor:pointer}
 .office-invite-launch:hover{background:#f0f7ee;border-color:#99b79e}
+.office-new-chat{
+  display:flex;align-items:center;gap:8px;width:100%;margin:0 0 4px;padding:8px 12px;border:0;border-radius:14px;
+  background:rgba(255,255,255,.08);color:var(--hi,#F2F2F7);cursor:pointer;text-align:left;
+  font:900 14px/1.2 ui-rounded,"SF Pro Rounded","Nunito",system-ui,sans-serif;
+}
+.office-new-chat:hover{background:rgba(255,255,255,.14)}
+.office-new-chat:active{transform:scale(.985)}
 .office-invite-dialog{width:min(440px,calc(100vw - 64px));max-height:calc(100dvh - 64px);overflow:auto;padding:28px;border:1px solid #d9e3dc;border-radius:24px;background:#fbfcf9;color:#22382c;font:14px/1.6 system-ui,sans-serif;box-shadow:0 24px 100px #0d241e55}
 .office-invite-dialog::backdrop{background:#15251e66;backdrop-filter:blur(5px)}
 .office-invite-dialog *{box-sizing:border-box}.office-invite-dialog [hidden]{display:none!important}
@@ -10,6 +17,7 @@
 .office-invite-dialog input,.office-invite-dialog select,.office-invite-dialog textarea{display:block;width:100%;margin-top:7px;padding:12px 13px;border:1px solid #d1dcd4;border-radius:12px;background:white;color:#243d2e;font:14px/1.6 system-ui;outline:none}
 .office-invite-dialog input:focus,.office-invite-dialog select:focus,.office-invite-dialog textarea:focus{border-color:#49835e;box-shadow:0 0 0 3px #49835e1a}
 .office-invite-dialog textarea{resize:vertical;font-size:12px;max-height:260px;min-height:150px;font-weight:400}
+.office-invite-dialog textarea.cursor-prompt{min-height:88px;max-height:160px;font-size:14px;font-weight:400}
 .invite-primary{width:100%;margin-top:8px;padding:13px 15px;border:0;border-radius:13px;background:#264d37;color:white;font:650 14px system-ui;cursor:pointer}.invite-primary:hover{background:#1a3c29}.invite-primary:disabled{opacity:.5;cursor:default}
 .invite-footnote{color:#7a877d;font-size:11px;line-height:1.7;margin:13px 0 0}.invite-notice{font-size:12px;color:#6d5438;min-height:0;margin:12px 0 0}.invite-notice:empty{display:none}
 .invite-status{padding:11px 13px;border-radius:12px;background:#f1e9cf;color:#756023;font-size:13px;font-weight:600}.invite-status[data-state=connected]{background:#dfefdf;color:#2b643f}.invite-status[data-state=revoked],.invite-status[data-state=expired]{background:#eceeeb;color:#657066}

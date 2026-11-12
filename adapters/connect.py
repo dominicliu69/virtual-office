@@ -74,8 +74,7 @@ def auto_connect(credential, environ=None):
             'reason': 'cursor_local_background_unavailable', 'requires_rejoin': False,
             'observation_setup_separate': True,
             'next_step': '這個本機 Cursor 聊天尚未有原生背景指令入口，'
-                '不代表 OFFICE 入場或公開同步失敗。入場以 joined 及首次回報為準；'
-                '請按本次邀請完成父子 Agent 的公開同步設定。'
+                '不代表 OFFICE 入場失敗。入場以 joined 及首次回報為準。'
                 '不要試接其他平台，也不要用等待工具冒充持續收訊。',
         }
     if not credential['agent_id'].startswith('codex:'):

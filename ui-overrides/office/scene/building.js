@@ -9,7 +9,6 @@ import { Spring, smoothstep } from './spring.js';
 import { FLOOR_STEP, SLAB, SHAFT_POS } from './office.js';
 import { WallDisplays } from './walls.js';
 import { floorStyles, applyFloorStyle, styleObjects, styleNightMaps } from './floorstyle.js';
-import { GroundHall } from './ground-hall.js';
 
 const LIFT = 20;                        // how far upper floors slide up, out of the frame (m)
 const SWAP_AT = 0.14;                   // s after a switch starts: blur peak, open/closed swap
@@ -128,8 +127,6 @@ export class Building {
     this.pool = [];                     // open-floor instances (max 2)
     this.sig = '';
     this.floorData = null;
-    this.overview = new GroundHall(assets);
-    this.group.add(this.overview.root);
     this.nightRecs = new Map();
 
     this.roof = new Instance(this, assets.templates.roof, 'roof');
@@ -147,14 +144,12 @@ export class Building {
     daylight.setLampSource(() => {
       const inst = this.activeOpen();
       if (!inst) return null;
-      const interior=this.activeSlot?.kind==='overview';
-      const lamps = interior?(inst.lampPositions||[]):this.assets.spots.lamps;
+      const lamps = this.assets.spots.lamps;
       for (let i = 0; i < 6; i++) {
         const p = lamps[i];
-        if(interior&&p){this.lampPositions[i].copy(p);inst.root.localToWorld(this.lampPositions[i]);}
-        else this.lampPositions[i].set(p ? p.x : 0, p ? p.y + inst.root.position.y : -99, p ? p.z : 0);
+        this.lampPositions[i].set(p ? p.x : 0, p ? p.y + inst.root.position.y : -99, p ? p.z : 0);
       }
-      return { positions: lamps.length ? this.lampPositions : [], k: inst.alpha,interior };
+      return { positions: lamps.length ? this.lampPositions : [], k: inst.alpha };
     });
     this.screenTargets = new Array(20).fill(0);
 
@@ -256,8 +251,6 @@ export class Building {
 
   setFloors(floors) {
     const list = floors.length ? floors : [{ id: '_', name: '', order: 1 }];
-    const overviewFloor=list.find(f=>f.kind==='overview');
-    this.overview.configure(overviewFloor?.seat_count??overviewFloor?.bots.length??0);
     const sig = list.map((f) => f.id).join('|');
     list.forEach((f, i) => { const s = this.byId.get(f.id); if (s) { s.name = f.name; s.index = i; } });
     if (sig === this.sig) return;
@@ -268,7 +261,7 @@ export class Building {
     this.slots = list.map((f, i) => {
       let s = this.byId.get(f.id);
       if (!s) {
-        const closed=f.kind==='overview'?{root:this.overview.closed,setShown(v){this.root.visible=v;},dispose(){this.root.removeFromParent();}}:new Instance(this,this.assets.templates.floor_closed,'closed');
+        const closed=new Instance(this,this.assets.templates.floor_closed,'closed');
         s = { id: f.id, name: f.name, kind:f.kind, index: i, closed, open: null, lift: new Spring(1, 0.5), showOpen: false };
         this.group.add(s.closed.root);
         s.closed.setShown(false);
@@ -286,7 +279,6 @@ export class Building {
   // The floor's accent + lounge corner on its open instance. For the active floor the lounge seats follow the corner:
   // spots that move are new objects, so a seated bot walks over to its new seat (scene.js reads assets.spots.lounges).
   applyStyle(slot) {
-    if(slot.kind==='overview')return;
     const st = this.styles.get(slot.id);
     if (!st || !slot.open) return;
     applyFloorStyle(slot.open.obj, st);
@@ -301,7 +293,6 @@ export class Building {
 
   disposeSlot(s) {
     s.closed.dispose();
-    if(s.open===this.overview){this.overview.setShown(false);return;}
     if (s.open) { this.pool = this.pool.filter((p) => p !== s.open); s.open.dispose(); }
   }
 
@@ -351,7 +342,6 @@ export class Building {
   }
 
   acquireOpen(slot) {
-    if(slot.kind==='overview'){slot.open=this.overview;this.overview.floorId=slot.id;return this.overview;}
     if (slot.open) return slot.open;
     // a free instance, else steal the hidden one (the visible one belongs to the floor we are leaving)
     const inst = this.pool.find((p) => !this.slots.some((s) => s.open === p))
@@ -376,7 +366,7 @@ export class Building {
   }
 
   prewarm(camera) {
-    const all = [this.roof, this.shaft, this.cabin, ...this.slots.map((s) => s.closed), ...this.pool, this.overview];
+    const all = [this.roof, this.shaft, this.cabin, ...this.slots.map((s) => s.closed), ...this.pool];
     const saved = all.map((i) => i.root.visible);
     all.forEach((i) => { i.root.visible = true; });
     const hidden = this.pool.flatMap((p) => styleObjects(p.obj)).filter((o) => !o.visible);   // every lounge corner, so a switch never compiles
